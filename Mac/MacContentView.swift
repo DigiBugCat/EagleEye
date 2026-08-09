@@ -25,8 +25,10 @@ struct MacContentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("EagleGaze").font(.largeTitle.bold())
-                    Text("Canonical gaze setup for macOS").foregroundStyle(.secondary)
+                    Text("Gaze feasibility rig").foregroundStyle(.secondary)
                 }
+
+                setupProgress
 
                 sourcePicker
                 displayPicker
@@ -43,6 +45,55 @@ struct MacContentView: View {
             .padding(18)
         }
         .frame(width: 360)
+    }
+
+    private var setupProgress: some View {
+        GroupBox("Setup progress") {
+            HStack(spacing: 8) {
+                progressStep(
+                    "Pair iPhone",
+                    symbol: "iphone.gen3.radiowaves.left.and.right",
+                    complete: application.activeSource != nil
+                )
+                progressConnector(complete: application.activeSource != nil)
+                progressStep(
+                    "Calibrate",
+                    symbol: "scope",
+                    complete: application.snapshot.profile != nil
+                )
+                progressConnector(complete: application.snapshot.profile != nil)
+                progressStep(
+                    "Live tracking",
+                    symbol: "eye.circle",
+                    complete: application.isFresh && application.snapshot.profile != nil
+                )
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func progressStep(_ title: String, symbol: String, complete: Bool) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: complete ? "checkmark.circle.fill" : symbol)
+                .font(.title3)
+                .foregroundStyle(complete ? .green : .secondary)
+            Text(title)
+                .font(.caption2)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(complete ? .primary : .secondary)
+                .frame(minHeight: 28, alignment: .top)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(complete ? "Complete" : "Not complete")
+    }
+
+    private func progressConnector(complete: Bool) -> some View {
+        Capsule()
+            .fill(complete ? Color.green : Color.secondary.opacity(0.25))
+            .frame(width: 20, height: 2)
+            .offset(y: -14)
+            .accessibilityHidden(true)
     }
 
     private var sourcePicker: some View {

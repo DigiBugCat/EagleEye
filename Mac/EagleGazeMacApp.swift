@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum EagleGazeSceneID {
+    static let mainWindow = "main"
+    static let statusWindow = "status"
+}
+
 @main
 struct EagleGazeMacApp: App {
     @StateObject private var application: EagleGazeApplication
@@ -13,7 +18,7 @@ struct EagleGazeMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("EagleGaze") {
+        WindowGroup("EagleGaze", id: EagleGazeSceneID.mainWindow) {
             MacContentView(
                 application: application,
                 voiceOSBridge: voiceOSBridge,
@@ -23,5 +28,31 @@ struct EagleGazeMacApp: App {
             .onAppear { overlayController.show(application: application) }
         }
         .defaultSize(width: 1180, height: 780)
+
+        Window("EagleGaze Status", id: EagleGazeSceneID.statusWindow) {
+            EagleGazeCompactStatusView(
+                application: application,
+                overlayController: overlayController
+            )
+        }
+        .defaultSize(width: 320, height: 210)
+        .windowResizability(.contentSize)
+
+        MenuBarExtra {
+            EagleGazeMenuBarView(
+                application: application,
+                overlayController: overlayController
+            )
+        } label: {
+            let status = EagleGazeMenuBarStatus.resolve(
+                hasSource: application.activeSource != nil,
+                isFresh: application.isFresh,
+                phase: application.snapshot.phase,
+                hasProfile: application.snapshot.profile != nil
+            )
+            Image(systemName: status.symbolName)
+                .accessibilityLabel("EagleGaze: \(status.title)")
+        }
+        .menuBarExtraStyle(.window)
     }
 }

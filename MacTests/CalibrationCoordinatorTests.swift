@@ -128,3 +128,12 @@ private func testPlan() throws -> CalibrationPlan {
     #expect(second.snapshot.phase == .complete)
     #expect(second.snapshot.evaluationHits == 1)
 }
+
+@Test func menuBarStatusPrioritizesConnectionAndActiveWork() {
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: false, isFresh: false, phase: .idle, hasProfile: false) == .needsPhone)
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: true, isFresh: false, phase: .calibrating, hasProfile: false) == .waiting)
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: true, isFresh: true, phase: .idle, hasProfile: false) == .connected)
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: true, isFresh: true, phase: .calibrating, hasProfile: false) == .calibrating)
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: true, isFresh: true, phase: .evaluating, hasProfile: true) == .evaluating)
+    #expect(EagleGazeMenuBarStatus.resolve(hasSource: true, isFresh: true, phase: .complete, hasProfile: true) == .ready)
+}
