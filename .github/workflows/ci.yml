@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test GazeCore
+        run: swift test --package-path Packages/GazeCore
+
+      - name: Build macOS app
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazeMac
+          -destination 'platform=macOS'
+          ONLY_ACTIVE_ARCH=YES
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Build iOS app
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazePhone
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
