@@ -69,7 +69,10 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Test macOS app modules
+      # Duck runs headlessly and has no per-login com.apple.testmanagerd
+      # service. Build the hosted XCTest bundle here; the same scheme is
+      # executed on a logged-in Mac in the local release gate.
+      - name: Build macOS test modules
         run: >-
           xcodebuild
           -project EagleGaze.xcodeproj
@@ -77,7 +80,7 @@ jobs:
           -destination 'platform=macOS,arch=arm64'
           ONLY_ACTIVE_ARCH=YES
           CODE_SIGNING_ALLOWED=NO
-          test
+          build-for-testing
 
       - name: Select an available iPhone simulator
         shell: bash
