@@ -1,9 +1,9 @@
 name: CI
 
 on:
+  # This private repository's write-access list is the trust boundary for Duck.
+  # Every branch push runs CI; fork pull-request code does not run independently.
   push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
