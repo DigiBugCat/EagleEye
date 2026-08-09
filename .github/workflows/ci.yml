@@ -88,17 +88,26 @@ jobs:
           simulator_udid="$({ xcrun simctl list devices available -j; } | /usr/bin/python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
-          print(next(
-              device["udid"]
+          available = [
+              device
               for runtime in devices.values()
               for device in runtime
-              if device.get("isAvailable") and "iPhone" in device.get("name", "")
-          ))
+              if device.get("isAvailable")
+          ]
+          selected = next(
+              (device for device in available if device.get("state") == "Booted"),
+              next((device for device in available if "iPhone" in device.get("name", "")), None),
+          )
+          if selected is None:
+              raise SystemExit("no available iOS simulator")
+          print(selected["udid"])
           ')"
           if [ -z "$simulator_udid" ]; then
             echo "Duck has no available iPhone simulator runtime." >&2
             exit 1
           fi
+          xcrun simctl boot "$simulator_udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$simulator_udid" -b
           echo "EAGLEGAZE_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
 
       - name: Test iPhone app modules
