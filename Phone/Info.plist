@@ -21,12 +21,13 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>Eagle Gaze uses the TrueDepth camera to estimate where you are looking.</string>
+    <string>Eagle Gaze uses the camera for on-device eye tracking and to scan a QR code when pairing with your Mac.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Eagle Gaze sends gaze measurements directly to your Mac on the local network.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_eagle-gaze._udp</string>
+        <string>_eagle-gaze-pair._tcp</string>
     </array>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>

@@ -33,6 +33,23 @@ least 90% of the time under modest natural head movement.
    across the entire Mac display, fits a 2D affine mapping, and renders a
    smoothed, click-through gaze dot above other Mac apps.
 
+## Rolling attention estimate
+
+The live gaze dot and the attention estimate serve different purposes. The dot
+uses an exponential moving average (EMA) so it remains responsive. Separately,
+the Mac keeps an in-memory 550 ms rolling window and reports the coordinate-wise
+median as a more stable estimate of where the user has recently been looking.
+
+The window has a hard horizon based on each sample's capture time: samples older
+than 550 ms relative to the newest accepted sample are removed, regardless of
+packet rate. It expires after a long sample gap and resets when tracking is
+lost, the phone starts a new session, or calibration is reset or replaced. This
+history is transient and is never persisted or exposed through VoiceOS.
+
+The estimate is a normalized screen location, not an identification of a macOS
+window, control, button, or other UI element. UI-element identification would
+require a separate macOS hit-testing or Accessibility integration.
+
 ## Run
 
 1. Open `EagleGaze.xcodeproj` in Xcode.
@@ -72,6 +89,20 @@ xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazeMac \
 xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhone \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
+
+## VoiceOS integration
+
+The [`VoiceOS`](VoiceOS) folder is a developer-preview VoiceOS integration. It
+runs as a local TypeScript MCP server and talks to the Mac app through a
+loopback-only bridge bound to `127.0.0.1:47474`. EagleGazePhone continues to
+discover the Mac automatically through Bonjour, so users do not enter an IP
+address for either hop.
+
+VoiceOS can report coarse connection/calibration state and, after a confirmation
+card, start or reset calibration. It does not receive raw ARKit data or gaze
+coordinates. See [`VoiceOS/README.md`](VoiceOS/README.md) for installation and
+[`VoiceOS/BOUNDARIES.md`](VoiceOS/BOUNDARIES.md) for the explicit trust and data
+boundary.
 
 ## Privacy boundary
 

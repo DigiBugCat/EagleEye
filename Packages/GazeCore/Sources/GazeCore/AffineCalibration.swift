@@ -51,6 +51,9 @@ public enum AffineCalibrationError: Error, Equatable, Sendable {
     case insufficientObservations(required: Int, received: Int)
     case nonFiniteObservation
     case degenerateInput
+    /// The observations were finite, but fitting overflowed or produced a
+    /// transform/result that cannot be safely consumed.
+    case nonFiniteResult
 }
 
 public enum AffineCalibration {
@@ -76,11 +79,13 @@ public enum AffineCalibration {
             throw AffineCalibrationError.nonFiniteObservation
         }
 
-        let count = Double(observations.count)
-        let meanInputX = observations.reduce(0) { $0 + $1.input.x } / count
-        let meanInputY = observations.reduce(0) { $0 + $1.input.y } / count
-        let meanOutputX = observations.reduce(0) { $0 + $1.output.x } / count
-        let meanOutputY = observations.reduce(0) { $0 + $1.output.y } / count
+        guard let meanInputX = finiteMean(observations.map { $0.input.x }),
+              let meanInputY = finiteMean(observations.map { $0.input.y }),
+              let meanOutputX = finiteMean(observations.map { $0.output.x }),
+              let meanOutputY = finiteMean(observations.map { $0.output.y })
+        else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
 
         var xx = 0.0
         var xy = 0.0
@@ -91,36 +96,145 @@ public enum AffineCalibration {
         var yOutputY = 0.0
 
         for observation in observations {
-            let x = observation.input.x - meanInputX
-            let y = observation.input.y - meanInputY
-            let outputX = observation.output.x - meanOutputX
-            let outputY = observation.output.y - meanOutputY
+            guard let x = finiteDifference(observation.input.x, meanInputX),
+                  let y = finiteDifference(observation.input.y, meanInputY),
+                  let outputX = finiteDifference(observation.output.x, meanOutputX),
+                  let outputY = finiteDifference(observation.output.y, meanOutputY),
+                  let xxTerm = finiteProduct(x, x),
+                  let xyTerm = finiteProduct(x, y),
+                  let yyTerm = finiteProduct(y, y),
+                  let xOutputXTerm = finiteProduct(x, outputX),
+                  let yOutputXTerm = finiteProduct(y, outputX),
+                  let xOutputYTerm = finiteProduct(x, outputY),
+                  let yOutputYTerm = finiteProduct(y, outputY),
+                  let nextXX = finiteSum(xx, xxTerm),
+                  let nextXY = finiteSum(xy, xyTerm),
+                  let nextYY = finiteSum(yy, yyTerm),
+                  let nextXOutputX = finiteSum(xOutputX, xOutputXTerm),
+                  let nextYOutputX = finiteSum(yOutputX, yOutputXTerm),
+                  let nextXOutputY = finiteSum(xOutputY, xOutputYTerm),
+                  let nextYOutputY = finiteSum(yOutputY, yOutputYTerm)
+            else {
+                throw AffineCalibrationError.nonFiniteResult
+            }
 
-            xx += x * x
-            xy += x * y
-            yy += y * y
-            xOutputX += x * outputX
-            yOutputX += y * outputX
-            xOutputY += x * outputY
-            yOutputY += y * outputY
+            xx = nextXX
+            xy = nextXY
+            yy = nextYY
+            xOutputX = nextXOutputX
+            yOutputX = nextYOutputX
+            xOutputY = nextXOutputY
+            yOutputY = nextYOutputY
         }
 
-        let determinant = xx * yy - xy * xy
-        let covarianceScale = max(xx, yy)
-        guard covarianceScale > 0,
+        guard let xxYY = finiteProduct(xx, yy),
+              let xyXY = finiteProduct(xy, xy),
+              let determinant = finiteDifference(xxYY, xyXY),
               determinant.isFinite,
-              determinant > degeneracyTolerance * covarianceScale * covarianceScale
+              xx.isFinite, xy.isFinite, yy.isFinite,
+              xOutputX.isFinite, yOutputX.isFinite,
+              xOutputY.isFinite, yOutputY.isFinite
+        else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
+
+        let covarianceScale = max(xx, yy)
+        guard covarianceScale > 0 else {
+            throw AffineCalibrationError.degenerateInput
+        }
+
+        // Compare the determinant after normalizing by the largest diagonal
+        // term. This is algebraically equivalent to the unscaled comparison,
+        // without overflowing while squaring a very large covariance scale.
+        let normalizedDeterminant = determinant / covarianceScale / covarianceScale
+        guard normalizedDeterminant.isFinite else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
+        guard determinant > 0,
+              normalizedDeterminant > degeneracyTolerance
         else {
             throw AffineCalibrationError.degenerateInput
         }
 
-        let a = (xOutputX * yy - yOutputX * xy) / determinant
-        let b = (yOutputX * xx - xOutputX * xy) / determinant
-        let c = (xOutputY * yy - yOutputY * xy) / determinant
-        let d = (yOutputY * xx - xOutputY * xy) / determinant
-        let tx = meanOutputX - a * meanInputX - b * meanInputY
-        let ty = meanOutputY - c * meanInputX - d * meanInputY
+        guard let aNumerator = finiteDifference(
+                  finiteProduct(xOutputX, yy), finiteProduct(yOutputX, xy)
+              ),
+              let bNumerator = finiteDifference(
+                  finiteProduct(yOutputX, xx), finiteProduct(xOutputX, xy)
+              ),
+              let cNumerator = finiteDifference(
+                  finiteProduct(xOutputY, yy), finiteProduct(yOutputY, xy)
+              ),
+              let dNumerator = finiteDifference(
+                  finiteProduct(yOutputY, xx), finiteProduct(xOutputY, xy)
+              )
+        else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
 
-        return AffineTransform2D(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+        let a = aNumerator / determinant
+        let b = bNumerator / determinant
+        let c = cNumerator / determinant
+        let d = dNumerator / determinant
+        guard a.isFinite, b.isFinite, c.isFinite, d.isFinite,
+              let aInputX = finiteProduct(a, meanInputX),
+              let bInputY = finiteProduct(b, meanInputY),
+              let cInputX = finiteProduct(c, meanInputX),
+              let dInputY = finiteProduct(d, meanInputY),
+              let tx = finiteDifference(
+                  finiteDifference(meanOutputX, aInputX), bInputY
+              ),
+              let ty = finiteDifference(
+                  finiteDifference(meanOutputY, cInputX), dInputY
+              ),
+              tx.isFinite, ty.isFinite
+        else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
+
+        let transform = AffineTransform2D(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+        guard observations.allSatisfy({ observation in
+            let mapped = transform.apply(to: observation.input)
+            return mapped.x.isFinite && mapped.y.isFinite
+        }) else {
+            throw AffineCalibrationError.nonFiniteResult
+        }
+        return transform
+    }
+
+    private static func finiteMean(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        // Weighted accumulation avoids overflowing a sum when all values have
+        // the same large finite sign. Differences are checked separately when
+        // centering observations below.
+        var mean = 0.0
+        for (index, value) in values.enumerated() {
+            let count = Double(index + 1)
+            let weightedPrevious = mean * (count - 1) / count
+            let weightedValue = value / count
+            mean = weightedPrevious + weightedValue
+            guard mean.isFinite else { return nil }
+        }
+        return mean
+    }
+
+    private static func finiteSum(_ lhs: Double, _ rhs: Double) -> Double? {
+        let result = lhs + rhs
+        return result.isFinite ? result : nil
+    }
+
+    private static func finiteDifference(_ lhs: Double, _ rhs: Double) -> Double? {
+        let result = lhs - rhs
+        return result.isFinite ? result : nil
+    }
+
+    private static func finiteDifference(_ lhs: Double?, _ rhs: Double?) -> Double? {
+        guard let lhs, let rhs else { return nil }
+        return finiteDifference(lhs, rhs)
+    }
+
+    private static func finiteProduct(_ lhs: Double, _ rhs: Double) -> Double? {
+        let result = lhs * rhs
+        return result.isFinite ? result : nil
     }
 }

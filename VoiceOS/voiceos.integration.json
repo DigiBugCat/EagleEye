@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "com.digibugcat.eaglegaze",
+  "version": "0.2.0",
+  "name": "EagleGaze",
+  "summary": "Check and calibrate the local EagleGaze eye-tracking prototype by voice.",
+  "description": "Controls the EagleGaze Mac app over a loopback-only bridge. Raw ARKit transforms and gaze coordinates are not returned to VoiceOS.",
+  "homepage": "https://github.com/DigiBugCat/EagleGaze",
+  "repository": "https://github.com/DigiBugCat/EagleGaze",
+  "categories": ["Accessibility", "Developer"],
+  "publisher": {
+    "id": "pub_digibugcat",
+    "name": "DigiBugCat",
+    "url": "https://github.com/DigiBugCat"
+  },
+  "runtime": {"kind": "local-mcp", "command": "/bin/zsh", "args": ["run.sh"]},
+  "permissions": [{"kind": "network", "domains": ["127.0.0.1"]}],
+  "tools": [
+    {
+      "name": "get_gaze_status",
+      "title": "Gaze status",
+      "description": "Check the local EagleGaze phone connection, Mac companion, and calibration state. Use when the user asks whether eye tracking is installed, connected, calibrated, ready, or currently evaluating. If the Mac companion is unavailable, return the first-run install card.",
+      "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+      "name": "start_gaze_calibration",
+      "title": "Start gaze calibration",
+      "description": "Start EagleGaze's full-screen nine-point calibration on this Mac. Use when the user asks to calibrate, recalibrate, or set up eye tracking.",
+      "inputSchema": {"type": "object", "properties": {}},
+      "confirmation": {
+        "schemaVersion": 1,
+        "root": {
+          "type": "card",
+          "title": "Start gaze calibration?",
+          "children": [{
+            "type": "text",
+            "text": "EagleGaze will show nine targets across the main display. Keep the iPhone and your seating position still.",
+            "variant": "body"
+          }],
+          "footer": [{
+            "type": "actions",
+            "items": [
+              {"label": "Cancel", "role": "cancel"},
+              {"label": "Start calibration", "role": "confirm", "color": "accent"}
+            ]
+          }]
+        }
+      }
+    },
+    {
+      "name": "start_gaze_evaluation",
+      "title": "Start gaze evaluation",
+      "description": "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
+      "inputSchema": {"type": "object", "properties": {}},
+      "confirmation": {
+        "schemaVersion": 1,
+        "root": {
+          "type": "card",
+          "title": "Start gaze accuracy test?",
+          "children": [{
+            "type": "text",
+            "text": "EagleGaze will show a bounded set of targets and score whether your gaze reaches the intended screen regions.",
+            "variant": "body"
+          }],
+          "footer": [{
+            "type": "actions",
+            "items": [
+              {"label": "Cancel", "role": "cancel"},
+              {"label": "Start test", "role": "confirm", "color": "accent"}
+            ]
+          }]
+        }
+      }
+    },
+    {
+      "name": "reset_gaze_calibration",
+      "title": "Reset gaze calibration",
+      "description": "Clear EagleGaze's current calibration and return it to setup. Use only when the user explicitly asks to reset or clear eye-tracking calibration.",
+      "inputSchema": {"type": "object", "properties": {}},
+      "confirmation": {
+        "schemaVersion": 1,
+        "root": {
+          "type": "card",
+          "title": "Reset gaze calibration?",
+          "children": [{
+            "type": "text",
+            "text": "The current in-memory calibration will be cleared. You can immediately run calibration again.",
+            "variant": "body"
+          }],
+          "footer": [{
+            "type": "actions",
+            "items": [
+              {"label": "Keep it", "role": "cancel"},
+              {"label": "Reset", "role": "confirm", "color": "accent"}
+            ]
+          }]
+        }
+      }
+    }
+  ]
+}

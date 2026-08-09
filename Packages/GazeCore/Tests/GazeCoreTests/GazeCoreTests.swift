@@ -148,6 +148,134 @@ private func sample(
     #expect(smoother.update(with: Point2D(x: 9, y: 9)) == Point2D(x: 9, y: 9))
 }
 
+@Test func rollingWindowRetainsExactBoundaryAndEvictsOlderSamples() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 0, y: 10), at: 1)
+    try window.append(Point2D(x: 2, y: 20), at: 1.2)
+
+    let atBoundaryResult = try window.estimate(at: 1.55)
+    let atBoundary = try #require(atBoundaryResult)
+    #expect(atBoundary.point == Point2D(x: 1, y: 15))
+    #expect(atBoundary.sampleCount == 2)
+    #expect(abs(atBoundary.coverageDuration - 0.2) < 1e-12)
+    #expect(abs(atBoundary.nextEvictionUptime - 1.55) < 1e-12)
+
+    let pastBoundaryResult = try window.estimate(at: 1.550_001)
+    let pastBoundary = try #require(pastBoundaryResult)
+    #expect(pastBoundary.point == Point2D(x: 2, y: 20))
+    #expect(pastBoundary.sampleCount == 1)
+    #expect(pastBoundary.coverageDuration == 0)
+    #expect(abs(pastBoundary.nextEvictionUptime - 1.75) < 1e-12)
+}
+
+@Test func rollingWindowExpiresDuringSilence() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 4, y: 8), at: 10)
+
+    #expect(try window.estimate(at: 10.55)?.sampleCount == 1)
+    #expect(try window.estimate(at: 10.551) == nil)
+}
+
+@Test func rollingWindowMedianRejectsSpatialOutlier() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 99_999, y: -99_999), at: 20)
+    try window.append(Point2D(x: 10, y: 20), at: 20.04)
+    try window.append(Point2D(x: 11, y: 19), at: 20.21)
+    let result = try window.append(Point2D(x: 9, y: 21), at: 20.5)
+    let estimate = try #require(result)
+
+    #expect(estimate.point == Point2D(x: 10.5, y: 19.5))
+    #expect(estimate.sampleCount == 4)
+    #expect(estimate.coverageDuration == 0.5)
+}
+
+@Test func rollingWindowUsesElapsedTimeWithIrregularSamples() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 1, y: 1), at: 30)
+    try window.append(Point2D(x: 2, y: 2), at: 30.001)
+    try window.append(Point2D(x: 3, y: 3), at: 30.53)
+    let result = try window.append(Point2D(x: 4, y: 4), at: 30.56)
+    let estimate = try #require(result)
+
+    #expect(estimate.point == Point2D(x: 3.5, y: 3.5))
+    #expect(estimate.sampleCount == 2)
+    #expect(abs(estimate.coverageDuration - 0.03) < 1e-12)
+}
+
+@Test func rollingWindowResetClearsEvidenceAndMonotonicClock() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 1, y: 2), at: 100)
+    window.reset()
+
+    #expect(try window.estimate(at: 1) == nil)
+    let result = try window.append(Point2D(x: 3, y: 4), at: 1.1)
+    let estimate = try #require(result)
+    #expect(estimate.point == Point2D(x: 3, y: 4))
+    #expect(estimate.sampleCount == 1)
+}
+
+@Test func rollingWindowRejectsInvalidConfigurationAndInput() throws {
+    for invalidDuration in [0, -0.1, .infinity, -.infinity, .nan] {
+        #expect(throws: RollingGazeWindowError.invalidWindowDuration) {
+            try RollingGazeWindow2D(windowDuration: invalidDuration)
+        }
+    }
+
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    #expect(throws: RollingGazeWindowError.nonFinitePoint) {
+        try window.append(Point2D(x: .nan, y: 0), at: 1)
+    }
+    #expect(throws: RollingGazeWindowError.nonFinitePoint) {
+        try window.append(Point2D(x: 0, y: .infinity), at: 1)
+    }
+    #expect(throws: RollingGazeWindowError.nonFiniteTimestamp) {
+        try window.append(Point2D(x: 0, y: 0), at: .nan)
+    }
+    #expect(throws: RollingGazeWindowError.nonFiniteTimestamp) {
+        try window.estimate(at: .infinity)
+    }
+}
+
+@Test func rollingWindowRejectsBackwardAppendAndEvaluation() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 1, y: 1), at: 5)
+
+    #expect(throws: RollingGazeWindowError.timeMovedBackward(lastObserved: 5, received: 4.9)) {
+        try window.append(Point2D(x: 2, y: 2), at: 4.9)
+    }
+    #expect(throws: RollingGazeWindowError.timeMovedBackward(lastObserved: 5, received: 4.8)) {
+        try window.estimate(at: 4.8)
+    }
+
+    _ = try window.estimate(at: 5.2)
+    _ = try window.append(Point2D(x: 3, y: 3), at: 5.1)
+    #expect(throws: RollingGazeWindowError.timeMovedBackward(lastObserved: 5.1, received: 5.05)) {
+        try window.append(Point2D(x: 4, y: 4), at: 5.05)
+    }
+    #expect(throws: RollingGazeWindowError.timeMovedBackward(lastObserved: 5.2, received: 5.15)) {
+        try window.estimate(at: 5.15)
+    }
+}
+
+@Test func rollingWindowAcceptsDelayedSampleAfterProjectedEvaluation() throws {
+    var window = try RollingGazeWindow2D(windowDuration: 0.55)
+    try window.append(Point2D(x: 1, y: 1), at: 10)
+    try window.append(Point2D(x: 2, y: 2), at: 10.5)
+
+    let projectedResult = try window.estimate(at: 10.9)
+    let projected = try #require(projectedResult)
+    #expect(projected.sampleCount == 1)
+    #expect(projected.point == Point2D(x: 2, y: 2))
+
+    // The datagram is newer than the last actual capture, even though network
+    // delay made it arrive after the Mac projected the sender clock forward.
+    let delayedResult = try window.append(Point2D(x: 3, y: 3), at: 10.501)
+    let delayed = try #require(delayedResult)
+    #expect(delayed.sampleCount == 2)
+    #expect(delayed.point == Point2D(x: 2.5, y: 2.5))
+    #expect(abs(delayed.nextEvictionUptime - 11.05) < 1e-12)
+}
+
 private extension Result where Success == Void, Failure == GazeSampleRejection {
     var isSuccess: Bool {
         if case .success = self { return true }

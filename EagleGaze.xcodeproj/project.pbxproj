@@ -6,77 +6,198 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		010000000000000000000001 /* EagleGazePhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000001 /* EagleGazePhoneApp.swift */; };
-		010000000000000000000002 /* FaceTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* FaceTrackingService.swift */; };
-		010000000000000000000003 /* GazeSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000003 /* GazeSender.swift */; };
-		010000000000000000000004 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* GazeCore */; };
-		010000000000000000000005 /* EagleGazeMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000005 /* EagleGazeMacApp.swift */; };
-		010000000000000000000006 /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000006 /* MacContentView.swift */; };
-		010000000000000000000007 /* GazeReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000007 /* GazeReceiver.swift */; };
-		010000000000000000000008 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000003 /* GazeCore */; };
-		010000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000000C /* Assets.xcassets */; };
+		010000000000000000000100 /* PhoneLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000100 /* PhoneLifecycleCoordinator.swift */;};
+		010000000000000000000101 /* PhonePairingSessionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000101 /* PhonePairingSessionClient.swift */;};
+		010000000000000000000102 /* EagleGazePhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000102 /* EagleGazePhoneApp.swift */;};
+		010000000000000000000103 /* FaceTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000103 /* FaceTrackingService.swift */;};
+		010000000000000000000104 /* GazeSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000104 /* GazeSender.swift */;};
+		010000000000000000000105 /* AVFoundationQRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000105 /* AVFoundationQRScanner.swift */;};
+		010000000000000000000106 /* NetworkPairingControlTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000106 /* NetworkPairingControlTransport.swift */;};
+		010000000000000000000107 /* PairedReceiverCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000107 /* PairedReceiverCatalog.swift */;};
+		010000000000000000000108 /* PairingControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000108 /* PairingControlClient.swift */;};
+		010000000000000000000109 /* PairingOfferParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000109 /* PairingOfferParser.swift */;};
+		01000000000000000000010A /* QRScannerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010A /* QRScannerCoordinator.swift */;};
+		01000000000000000000010B /* PairedReceiverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010B /* PairedReceiverStore.swift */;};
+		01000000000000000000010C /* PhoneGazePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010C /* PhoneGazePipeline.swift */;};
+		01000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift */;};
+		01000000000000000000010E /* PhonePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010E /* PhonePresentation.swift */;};
+		01000000000000000000010F /* PhonePrivacyConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010F /* PhonePrivacyConsent.swift */;};
+		010000000000000000000110 /* PhonePrivacyConsentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000110 /* PhonePrivacyConsentStore.swift */;};
+		010000000000000000000111 /* FaceTrackingSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000111 /* FaceTrackingSource.swift */;};
+		010000000000000000000112 /* AuthenticatedGazeCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000112 /* AuthenticatedGazeCodec.swift */;};
+		010000000000000000000113 /* GazeTransportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000113 /* GazeTransportCoordinator.swift */;};
+		010000000000000000000114 /* GazeTransportTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000114 /* GazeTransportTypes.swift */;};
+		010000000000000000000115 /* InMemoryGazeTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000115 /* InMemoryGazeTransport.swift */;};
+		010000000000000000000116 /* NetworkGazeTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000116 /* NetworkGazeTransport.swift */;};
+		010000000000000000000117 /* EagleGazeApplication.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000117 /* EagleGazeApplication.swift */;};
+		010000000000000000000118 /* CalibrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000118 /* CalibrationCoordinator.swift */;};
+		010000000000000000000119 /* CalibrationProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000119 /* CalibrationProfileStore.swift */;};
+		01000000000000000000011A /* EagleGazeMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011A /* EagleGazeMacApp.swift */;};
+		01000000000000000000011B /* GazeReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011B /* GazeReceiver.swift */;};
+		01000000000000000000011C /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011C /* MacContentView.swift */;};
+		01000000000000000000011D /* KeychainPairedDeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011D /* KeychainPairedDeviceStore.swift */;};
+		01000000000000000000011E /* MacReceiverIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011E /* MacReceiverIdentityStore.swift */;};
+		01000000000000000000011F /* PairedDeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000011F /* PairedDeviceStore.swift */;};
+		010000000000000000000120 /* PairingAdvertisementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000120 /* PairingAdvertisementService.swift */;};
+		010000000000000000000121 /* PairingControlServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000121 /* PairingControlServer.swift */;};
+		010000000000000000000122 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000122 /* PairingService.swift */;};
+		010000000000000000000123 /* DisplayProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000123 /* DisplayProvider.swift */;};
+		010000000000000000000124 /* GazeOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000124 /* GazeOverlayController.swift */;};
+		010000000000000000000125 /* PairingQRView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000125 /* PairingQRView.swift */;};
+		010000000000000000000126 /* MacPrivacyDisclosure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000126 /* MacPrivacyDisclosure.swift */;};
+		010000000000000000000127 /* MacPrivacyDisclosureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000127 /* MacPrivacyDisclosureStore.swift */;};
+		010000000000000000000128 /* ARKitNetworkSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000128 /* ARKitNetworkSource.swift */;};
+		010000000000000000000129 /* GazeSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000129 /* GazeSource.swift */;};
+		01000000000000000000012A /* VoiceOSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012A /* VoiceOSBridge.swift */;};
+		01000000000000000000012B /* PairingControlClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012B /* PairingControlClientTests.swift */;};
+		01000000000000000000012C /* PairingPhoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012C /* PairingPhoneTests.swift */;};
+		01000000000000000000012D /* PhonePrivacyConsentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012D /* PhonePrivacyConsentTests.swift */;};
+		01000000000000000000012E /* TransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012E /* TransportTests.swift */;};
+		01000000000000000000012F /* CalibrationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000012F /* CalibrationCoordinatorTests.swift */;};
+		010000000000000000000130 /* MacPrivacyDisclosureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000130 /* MacPrivacyDisclosureTests.swift */;};
+		010000000000000000000131 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000132 /* Assets.xcassets */;};
+		010000000000000000000132 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* GazeCore */;};
+		010000000000000000000133 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000003 /* GazeCore */;};
+		010000000000000000000134 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* GazeCore */;};
+		010000000000000000000135 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000003 /* GazeCore */;};
+		010000000000000000000136 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000135 /* XCTest.framework */;};
+		010000000000000000000137 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000135 /* XCTest.framework */;};
+		010000000000000000000138 /* EagleGazeMenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000138 /* EagleGazeMenuBarView.swift */;};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		020000000000000000000001 /* EagleGazePhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EagleGazePhoneApp.swift; sourceTree = "<group>"; };
-		020000000000000000000002 /* FaceTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceTrackingService.swift; sourceTree = "<group>"; };
-		020000000000000000000003 /* GazeSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeSender.swift; sourceTree = "<group>"; };
-		020000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		020000000000000000000005 /* EagleGazeMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EagleGazeMacApp.swift; sourceTree = "<group>"; };
-		020000000000000000000006 /* MacContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
-		020000000000000000000007 /* GazeReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeReceiver.swift; sourceTree = "<group>"; };
-		020000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		020000000000000000000009 /* EagleGazeMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EagleGazeMac.entitlements; sourceTree = "<group>"; };
+		020000000000000000000100 /* PhoneLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PhoneLifecycleCoordinator.swift; sourceTree = "<group>"; };
+		020000000000000000000101 /* PhonePairingSessionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PhonePairingSessionClient.swift; sourceTree = "<group>"; };
+		020000000000000000000102 /* EagleGazePhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EagleGazePhoneApp.swift; sourceTree = "<group>"; };
+		020000000000000000000103 /* FaceTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceTrackingService.swift; sourceTree = "<group>"; };
+		020000000000000000000104 /* GazeSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeSender.swift; sourceTree = "<group>"; };
+		020000000000000000000105 /* AVFoundationQRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/AVFoundationQRScanner.swift; sourceTree = "<group>"; };
+		020000000000000000000106 /* NetworkPairingControlTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/NetworkPairingControlTransport.swift; sourceTree = "<group>"; };
+		020000000000000000000107 /* PairedReceiverCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairedReceiverCatalog.swift; sourceTree = "<group>"; };
+		020000000000000000000108 /* PairingControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingControlClient.swift; sourceTree = "<group>"; };
+		020000000000000000000109 /* PairingOfferParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingOfferParser.swift; sourceTree = "<group>"; };
+		02000000000000000000010A /* QRScannerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/QRScannerCoordinator.swift; sourceTree = "<group>"; };
+		02000000000000000000010B /* PairedReceiverStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/PairedReceiverStore.swift; sourceTree = "<group>"; };
+		02000000000000000000010C /* PhoneGazePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline/PhoneGazePipeline.swift; sourceTree = "<group>"; };
+		02000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/KeychainPhonePrivacyConsentStore.swift; sourceTree = "<group>"; };
+		02000000000000000000010E /* PhonePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/PhonePresentation.swift; sourceTree = "<group>"; };
+		02000000000000000000010F /* PhonePrivacyConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/PhonePrivacyConsent.swift; sourceTree = "<group>"; };
+		020000000000000000000110 /* PhonePrivacyConsentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/PhonePrivacyConsentStore.swift; sourceTree = "<group>"; };
+		020000000000000000000111 /* FaceTrackingSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tracking/FaceTrackingSource.swift; sourceTree = "<group>"; };
+		020000000000000000000112 /* AuthenticatedGazeCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport/AuthenticatedGazeCodec.swift; sourceTree = "<group>"; };
+		020000000000000000000113 /* GazeTransportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport/GazeTransportCoordinator.swift; sourceTree = "<group>"; };
+		020000000000000000000114 /* GazeTransportTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport/GazeTransportTypes.swift; sourceTree = "<group>"; };
+		020000000000000000000115 /* InMemoryGazeTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport/InMemoryGazeTransport.swift; sourceTree = "<group>"; };
+		020000000000000000000116 /* NetworkGazeTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport/NetworkGazeTransport.swift; sourceTree = "<group>"; };
+		020000000000000000000117 /* EagleGazeApplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/EagleGazeApplication.swift; sourceTree = "<group>"; };
+		020000000000000000000118 /* CalibrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration/CalibrationCoordinator.swift; sourceTree = "<group>"; };
+		020000000000000000000119 /* CalibrationProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calibration/CalibrationProfileStore.swift; sourceTree = "<group>"; };
+		02000000000000000000011A /* EagleGazeMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EagleGazeMacApp.swift; sourceTree = "<group>"; };
+		02000000000000000000011B /* GazeReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeReceiver.swift; sourceTree = "<group>"; };
+		02000000000000000000011C /* MacContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
+		02000000000000000000011D /* KeychainPairedDeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/KeychainPairedDeviceStore.swift; sourceTree = "<group>"; };
+		02000000000000000000011E /* MacReceiverIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/MacReceiverIdentityStore.swift; sourceTree = "<group>"; };
+		02000000000000000000011F /* PairedDeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairedDeviceStore.swift; sourceTree = "<group>"; };
+		020000000000000000000120 /* PairingAdvertisementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingAdvertisementService.swift; sourceTree = "<group>"; };
+		020000000000000000000121 /* PairingControlServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingControlServer.swift; sourceTree = "<group>"; };
+		020000000000000000000122 /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingService.swift; sourceTree = "<group>"; };
+		020000000000000000000123 /* DisplayProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/DisplayProvider.swift; sourceTree = "<group>"; };
+		020000000000000000000124 /* GazeOverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/GazeOverlayController.swift; sourceTree = "<group>"; };
+		020000000000000000000125 /* PairingQRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/PairingQRView.swift; sourceTree = "<group>"; };
+		020000000000000000000126 /* MacPrivacyDisclosure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/MacPrivacyDisclosure.swift; sourceTree = "<group>"; };
+		020000000000000000000127 /* MacPrivacyDisclosureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/MacPrivacyDisclosureStore.swift; sourceTree = "<group>"; };
+		020000000000000000000128 /* ARKitNetworkSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ARKitNetworkSource.swift; sourceTree = "<group>"; };
+		020000000000000000000129 /* GazeSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/GazeSource.swift; sourceTree = "<group>"; };
+		02000000000000000000012A /* VoiceOSBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOSBridge.swift; sourceTree = "<group>"; };
+		02000000000000000000012B /* PairingControlClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingControlClientTests.swift; sourceTree = "<group>"; };
+		02000000000000000000012C /* PairingPhoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingPhoneTests.swift; sourceTree = "<group>"; };
+		02000000000000000000012D /* PhonePrivacyConsentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePrivacyConsentTests.swift; sourceTree = "<group>"; };
+		02000000000000000000012E /* TransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportTests.swift; sourceTree = "<group>"; };
+		02000000000000000000012F /* CalibrationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationCoordinatorTests.swift; sourceTree = "<group>"; };
+		020000000000000000000130 /* MacPrivacyDisclosureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPrivacyDisclosureTests.swift; sourceTree = "<group>"; };
+		020000000000000000000131 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		020000000000000000000132 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		020000000000000000000133 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		020000000000000000000134 /* EagleGazeMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EagleGazeMac.entitlements; sourceTree = "<group>"; };
+		020000000000000000000135 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		02000000000000000000000A /* EagleGazePhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EagleGazePhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		02000000000000000000000B /* EagleGazeMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EagleGazeMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		02000000000000000000000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		020000000000000000000136 /* EagleGazePhoneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EagleGazePhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000137 /* EagleGazeMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EagleGazeMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000138 /* EagleGazeMenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/EagleGazeMenuBarView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		030000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000004 /* GazeCore in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
-		030000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000008 /* GazeCore in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
+		030000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000132); runOnlyForDeploymentPostprocessing = 0; };
+		030000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000133); runOnlyForDeploymentPostprocessing = 0; };
+		030000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000134, 010000000000000000000136); runOnlyForDeploymentPostprocessing = 0; };
+		030000000000000000000004 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000135, 010000000000000000000137); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		040000000000000000000001 = {isa = PBXGroup; children = (040000000000000000000002 /* Phone */, 040000000000000000000003 /* Mac */, 040000000000000000000004 /* Packages */, 040000000000000000000005 /* Products */); sourceTree = "<group>"; };
-		040000000000000000000002 /* Phone */ = {isa = PBXGroup; children = (020000000000000000000001, 020000000000000000000002, 020000000000000000000003, 020000000000000000000004, 02000000000000000000000C); path = Phone; sourceTree = "<group>"; };
-		040000000000000000000003 /* Mac */ = {isa = PBXGroup; children = (020000000000000000000005, 020000000000000000000006, 020000000000000000000007, 020000000000000000000008, 020000000000000000000009); path = Mac; sourceTree = "<group>"; };
+		040000000000000000000001 = {isa = PBXGroup; children = (040000000000000000000002, 040000000000000000000003, 040000000000000000000006, 040000000000000000000007, 040000000000000000000004, 040000000000000000000005); sourceTree = "<group>"; };
+		040000000000000000000002 /* Phone */ = {isa = PBXGroup; children = (020000000000000000000100, 020000000000000000000101, 020000000000000000000102, 020000000000000000000103, 020000000000000000000104, 020000000000000000000105, 020000000000000000000106, 020000000000000000000107, 020000000000000000000108, 020000000000000000000109, 02000000000000000000010A, 02000000000000000000010B, 02000000000000000000010C, 02000000000000000000010D, 02000000000000000000010E, 02000000000000000000010F, 020000000000000000000110, 020000000000000000000111, 020000000000000000000112, 020000000000000000000113, 020000000000000000000114, 020000000000000000000115, 020000000000000000000116, 020000000000000000000131, 020000000000000000000132); path = Phone; sourceTree = "<group>"; };
+		040000000000000000000003 /* Mac */ = {isa = PBXGroup; children = (020000000000000000000117, 020000000000000000000118, 020000000000000000000119, 02000000000000000000011A, 02000000000000000000011B, 02000000000000000000011C, 02000000000000000000011D, 02000000000000000000011E, 02000000000000000000011F, 020000000000000000000120, 020000000000000000000121, 020000000000000000000122, 020000000000000000000123, 020000000000000000000124, 020000000000000000000125, 020000000000000000000126, 020000000000000000000127, 020000000000000000000128, 020000000000000000000129, 02000000000000000000012A, 020000000000000000000138, 020000000000000000000133, 020000000000000000000134); path = Mac; sourceTree = "<group>"; };
+		040000000000000000000006 /* PhoneTests */ = {isa = PBXGroup; children = (02000000000000000000012B, 02000000000000000000012C, 02000000000000000000012D, 02000000000000000000012E); path = PhoneTests; sourceTree = "<group>"; };
+		040000000000000000000007 /* MacTests */ = {isa = PBXGroup; children = (02000000000000000000012F, 020000000000000000000130); path = MacTests; sourceTree = "<group>"; };
 		040000000000000000000004 /* Packages */ = {isa = PBXGroup; children = (); path = Packages; sourceTree = "<group>"; };
-		040000000000000000000005 /* Products */ = {isa = PBXGroup; children = (02000000000000000000000A, 02000000000000000000000B); name = Products; sourceTree = "<group>"; };
+		040000000000000000000005 /* Products */ = {isa = PBXGroup; children = (02000000000000000000000A, 02000000000000000000000B, 020000000000000000000136, 020000000000000000000137); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		050000000000000000000001 /* EagleGazePhone */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000002; buildPhases = (070000000000000000000001, 030000000000000000000001, 080000000000000000000001); buildRules = (); dependencies = (); name = EagleGazePhone; packageProductDependencies = (0D0000000000000000000002); productName = EagleGazePhone; productReference = 02000000000000000000000A; productType = "com.apple.product-type.application"; };
 		050000000000000000000002 /* EagleGazeMac */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000003; buildPhases = (070000000000000000000002, 030000000000000000000002, 080000000000000000000002); buildRules = (); dependencies = (); name = EagleGazeMac; packageProductDependencies = (0D0000000000000000000003); productName = EagleGazeMac; productReference = 02000000000000000000000B; productType = "com.apple.product-type.application"; };
+		050000000000000000000003 /* EagleGazePhoneTests */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000004; buildPhases = (070000000000000000000003, 030000000000000000000003, 080000000000000000000003); buildRules = (); dependencies = (090000000000000000000001); name = EagleGazePhoneTests; packageProductDependencies = (0D0000000000000000000002); productName = EagleGazePhoneTests; productReference = 020000000000000000000136; productType = "com.apple.product-type.bundle.unit-test"; };
+		050000000000000000000004 /* EagleGazeMacTests */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000005; buildPhases = (070000000000000000000004, 030000000000000000000004, 080000000000000000000004); buildRules = (); dependencies = (090000000000000000000002); name = EagleGazeMacTests; packageProductDependencies = (0D0000000000000000000003); productName = EagleGazeMacTests; productReference = 020000000000000000000137; productType = "com.apple.product-type.bundle.unit-test"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		060000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2660; LastUpgradeCheck = 2660; TargetAttributes = {050000000000000000000001 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000002 = {CreatedOnToolsVersion = 26.6; };};}; buildConfigurationList = 0B0000000000000000000001; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 040000000000000000000001; packageReferences = (0D0000000000000000000001); productRefGroup = 040000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (050000000000000000000001, 050000000000000000000002); };
+		060000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2660; LastUpgradeCheck = 2660; TargetAttributes = {050000000000000000000001 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000002 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000003 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000001; }; 050000000000000000000004 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000002; };};}; buildConfigurationList = 0B0000000000000000000001; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 040000000000000000000001; packageReferences = (0D0000000000000000000001); productRefGroup = 040000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (050000000000000000000001, 050000000000000000000002, 050000000000000000000003, 050000000000000000000004); };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		080000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000009 /* Assets.xcassets in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		080000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000131); runOnlyForDeploymentPostprocessing = 0; };
 		080000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		080000000000000000000003 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		080000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		070000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000001, 010000000000000000000002, 010000000000000000000003); runOnlyForDeploymentPostprocessing = 0; };
-		070000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000005, 010000000000000000000006, 010000000000000000000007); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000100, 010000000000000000000101, 010000000000000000000102, 010000000000000000000103, 010000000000000000000104, 010000000000000000000105, 010000000000000000000106, 010000000000000000000107, 010000000000000000000108, 010000000000000000000109, 01000000000000000000010A, 01000000000000000000010B, 01000000000000000000010C, 01000000000000000000010D, 01000000000000000000010E, 01000000000000000000010F, 010000000000000000000110, 010000000000000000000111, 010000000000000000000112, 010000000000000000000113, 010000000000000000000114, 010000000000000000000115, 010000000000000000000116); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000117, 010000000000000000000118, 010000000000000000000119, 01000000000000000000011A, 01000000000000000000011B, 01000000000000000000011C, 01000000000000000000011D, 01000000000000000000011E, 01000000000000000000011F, 010000000000000000000120, 010000000000000000000121, 010000000000000000000122, 010000000000000000000123, 010000000000000000000124, 010000000000000000000125, 010000000000000000000126, 010000000000000000000127, 010000000000000000000128, 010000000000000000000129, 01000000000000000000012A, 010000000000000000000138); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (01000000000000000000012B, 01000000000000000000012C, 01000000000000000000012D, 01000000000000000000012E); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (01000000000000000000012F, 010000000000000000000130); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		090000000000000000000001 /* EagleGazePhone */ = {isa = PBXTargetDependency; target = 050000000000000000000001; targetProxy = 0E000000000000000000000001; };
+		090000000000000000000002 /* EagleGazeMac */ = {isa = PBXTargetDependency; target = 050000000000000000000002; targetProxy = 0E000000000000000000000002; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		0E000000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = 060000000000000000000001; proxyType = 1; remoteGlobalIDString = 050000000000000000000001; remoteInfo = EagleGazePhone; };
+		0E000000000000000000000002 = {isa = PBXContainerItemProxy; containerPortal = 060000000000000000000001; proxyType = 1; remoteGlobalIDString = 050000000000000000000002; remoteInfo = EagleGazeMac; };
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		0A0000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug; };
 		0A0000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O";}; name = Release; };
-		0A0000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Phone/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhone; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;}; name = Debug; };
-		0A0000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Phone/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhone; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;}; name = Release; };
-		0A0000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Mac/EagleGazeMac.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Mac/Info.plist; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMac; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0;}; name = Debug; };
-		0A0000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Mac/EagleGazeMac.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Mac/Info.plist; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMac; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0;}; name = Release; };
+		0A0000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Phone/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhone; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug; };
+		0A0000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Phone/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhone; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-O";}; name = Release; };
+		0A0000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Mac/EagleGazeMac.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Mac/Info.plist; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMac; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug; };
+		0A0000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Mac/EagleGazeMac.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Mac/Info.plist; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMac; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-O";}; name = Release; };
+		0A0000000000000000000007 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhoneTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EagleGazePhone.app/EagleGazePhone"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = 1;}; name = Debug; };
+		0A0000000000000000000008 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazePhoneTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EagleGazePhone.app/EagleGazePhone"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = 1;}; name = Release; };
+		0A0000000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"; MARKETING_VERSION = 0.1; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMacTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EagleGazeMac.app/Contents/MacOS/EagleGazeMac"; MACOSX_DEPLOYMENT_TARGET = 14.0;}; name = Debug; };
+		0A000000000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.aviary.EagleGazeMacTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EagleGazeMac.app/Contents/MacOS/EagleGazeMac"; MACOSX_DEPLOYMENT_TARGET = 14.0;}; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
 		0B0000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000001, 0A0000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0B0000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000003, 0A0000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0B0000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000005, 0A0000000000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0B0000000000000000000004 = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000007, 0A0000000000000000000008); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0B0000000000000000000005 = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000009, 0A000000000000000000000A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -87,6 +208,7 @@
 		0D0000000000000000000002 /* GazeCore */ = {isa = XCSwiftPackageProductDependency; package = 0D0000000000000000000001; productName = GazeCore; };
 		0D0000000000000000000003 /* GazeCore */ = {isa = XCSwiftPackageProductDependency; package = 0D0000000000000000000001; productName = GazeCore; };
 /* End XCSwiftPackageProductDependency section */
-	};
+
+};
 	rootObject = 060000000000000000000001 /* Project object */;
 }

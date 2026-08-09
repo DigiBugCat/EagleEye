@@ -1,10 +1,17 @@
 import Combine
 import Foundation
 import GazeCore
-import Network
 
+/// Compatibility façade for the original Mac UI.  New code should depend on
+/// GazeSourceManager and consume CanonicalGazeFrame values; this façade keeps
+/// the published counters and DEBUG-only GazeSample bridge while the UI is
+/// migrated.
 @MainActor
 final class GazeReceiver: ObservableObject {
+    enum ActivationError: Error, Equatable {
+        case invalidSourceID
+    }
+
     enum State: Equatable {
         case starting
         case advertising(port: UInt16)
@@ -30,57 +37,60 @@ final class GazeReceiver: ObservableObject {
 
     @Published private(set) var state: State = .starting
     @Published private(set) var latestSample: GazeSample?
+    @Published private(set) var latestFrame: CanonicalGazeFrame?
     @Published private(set) var isFresh = false
     @Published private(set) var acceptedPacketCount = 0
     @Published private(set) var rejectedPacketCount = 0
     @Published private(set) var decodeErrorCount = 0
     @Published private(set) var lastRejection: String?
 
-    private let queue = DispatchQueue(label: "app.eaglegaze.mac.receiver", qos: .userInteractive)
-    private var listener: NWListener?
-    private var connections: [ObjectIdentifier: NWConnection] = [:]
-    private var gate = GazeSampleGate(maximumTransitAge: nil)
-    private var freshnessTask: Task<Void, Never>?
+    private(set) var source: ARKitNetworkSource
+    let sourceManager: GazeSourceManager
+
+    /// The source inventory is intentionally read-only here. Pairing or
+    /// presentation code must call `activatePairedSource` to select one; a
+    /// newly discovered packet can never replace the active adapter.
+    var availableSources: [GazeSourceDescriptor] { sourceManager.sources }
+    var selectedSourceID: GazeSourceID? { sourceManager.activeSourceID }
+    var selectedSourceDescriptor: GazeSourceDescriptor? { sourceManager.activeSource }
 
     init() {
-        start()
+        source = ARKitNetworkSource()
+        sourceManager = GazeSourceManager()
+        #if DEBUG
+        source.compatibilitySampleHandler = { [weak self] sample in
+            self?.latestSample = sample
+        }
+        #endif
+        sourceManager.eventHandler = { [weak self] event in self?.consume(event) }
+        do {
+            try sourceManager.register(source)
+            // This is the one explicit source selection performed by the
+            // application composition root. The manager never auto-switches.
+            try sourceManager.select(sourceID: source.descriptor.sourceID)
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
     }
 
     func start() {
-        guard listener == nil else { return }
-        state = .starting
-
+        guard !source.isRunning else { return }
         do {
-            let parameters = NWParameters.udp
-            parameters.includePeerToPeer = true
-            let listener = try NWListener(using: parameters, on: .any)
-            listener.service = NWListener.Service(type: "_eagle-gaze._udp")
-            listener.stateUpdateHandler = { [weak self] newState in
-                Task { @MainActor in
-                    self?.handleListenerState(newState)
-                }
+            if sourceManager.activeSourceID == nil {
+                try sourceManager.select(sourceID: source.descriptor.sourceID)
+            } else {
+                sourceManager.stopActive()
+                try sourceManager.select(sourceID: source.descriptor.sourceID)
             }
-            listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in
-                    self?.accept(connection)
-                }
-            }
-            self.listener = listener
-            listener.start(queue: queue)
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
     func stop() {
-        freshnessTask?.cancel()
-        freshnessTask = nil
-        connections.values.forEach { $0.cancel() }
-        connections.removeAll()
-        listener?.cancel()
-        listener = nil
-        gate.reset()
+        sourceManager.stopActive()
         latestSample = nil
+        latestFrame = nil
         isFresh = false
         state = .stopped
     }
@@ -90,92 +100,75 @@ final class GazeReceiver: ObservableObject {
         start()
     }
 
-    private func handleListenerState(_ newState: NWListener.State) {
-        switch newState {
-        case .setup:
-            state = .starting
-        case .waiting(let error):
-            state = .waiting(error.localizedDescription)
-        case .ready:
-            state = .advertising(port: listener?.port?.rawValue ?? 0)
-        case .failed(let error):
-            state = .failed(error.localizedDescription)
-            listener?.cancel()
-            listener = nil
-        case .cancelled:
+    /// Replaces the current ARKit adapter with one bound to an explicitly
+    /// paired device/session. The old listener is stopped and unregistered
+    /// before the new listener is started, so two adapters cannot overlap.
+    /// Passing `nil` for the session is retained for DEBUG migration only;
+    /// Release ingestion still rejects plaintext packets.
+    func activatePairedSource(
+        sourceID: GazeSourceID,
+        displayName: String,
+        secureSession: ARKitNetworkSource.SecureSession? = nil,
+        receiverFingerprint: String? = nil
+    ) throws {
+        guard sourceID.isValid else { throw ActivationError.invalidSourceID }
+
+        let oldID = source.descriptor.sourceID
+        sourceManager.stopActive()
+        if sourceManager.source(sourceID: oldID) != nil {
+            try sourceManager.unregister(sourceID: oldID)
+        }
+
+        let replacement = ARKitNetworkSource(
+            sourceID: sourceID,
+            displayName: displayName,
+            configuration: .init(
+                secureSession: secureSession,
+                receiverFingerprint: receiverFingerprint ?? ARKitNetworkSource.debugReceiverFingerprint
+            )
+        )
+        #if DEBUG
+        replacement.compatibilitySampleHandler = { [weak self] sample in
+            self?.latestSample = sample
+        }
+        #endif
+        source = replacement
+        clearPublishedGazeState()
+        try sourceManager.register(replacement)
+        try sourceManager.select(sourceID: sourceID)
+    }
+
+    private func consume(_ event: GazeSourceEvent) {
+        acceptedPacketCount = source.acceptedPacketCount
+        rejectedPacketCount = source.rejectedPacketCount
+        switch event {
+        case .started:
+            state = .advertising(port: source.listeningPort?.rawValue ?? 0)
+        case .frame(let frame):
+            latestFrame = frame
+            isFresh = true
+        case .freshnessChanged(let fresh):
+            isFresh = fresh
+        case .waiting(let detail):
+            state = .waiting(detail)
+        case .rejected(let reason):
+            lastRejection = reason
+            decodeErrorCount = source.rejectedPacketCount
+        case .failed(let detail):
+            state = .failed(detail)
+        case .stopped:
             if state != .stopped { state = .stopped }
-        @unknown default:
-            state = .waiting("unknown Network.framework state")
         }
     }
 
-    private func accept(_ connection: NWConnection) {
-        let identifier = ObjectIdentifier(connection)
-        connections[identifier] = connection
-        connection.stateUpdateHandler = { [weak self, weak connection] connectionState in
-            guard let connection else { return }
-            if case .failed = connectionState {
-                Task { @MainActor in self?.remove(connection) }
-            } else if case .cancelled = connectionState {
-                Task { @MainActor in self?.remove(connection) }
-            }
-        }
-        connection.start(queue: queue)
-        receiveMessage(on: connection)
-    }
-
-    private func remove(_ connection: NWConnection) {
-        connections.removeValue(forKey: ObjectIdentifier(connection))
-    }
-
-    private func receiveMessage(on connection: NWConnection) {
-        connection.receiveMessage { [weak self, weak connection] data, _, _, error in
-            guard let self, let connection else { return }
-            Task { @MainActor in
-                if let data, !data.isEmpty {
-                    self.consume(data)
-                }
-
-                if error == nil {
-                    self.receiveMessage(on: connection)
-                } else {
-                    self.remove(connection)
-                    connection.cancel()
-                }
-            }
-        }
-    }
-
-    private func consume(_ data: Data) {
-        do {
-            let sample = try GazeDatagramCodec.decode(data)
-            switch gate.accept(sample, receivedAtUptime: ProcessInfo.processInfo.systemUptime) {
-            case .success:
-                acceptedPacketCount += 1
-                latestSample = sample
-                markFresh(sequence: sample.sequence, sessionID: sample.sessionID)
-            case .failure(let rejection):
-                rejectedPacketCount += 1
-                lastRejection = String(describing: rejection)
-            }
-        } catch {
-            decodeErrorCount += 1
-            lastRejection = error.localizedDescription
-        }
-    }
-
-    private func markFresh(sequence: UInt64, sessionID: UUID) {
-        isFresh = true
-        freshnessTask?.cancel()
-        freshnessTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard self?.latestSample?.sequence == sequence,
-                      self?.latestSample?.sessionID == sessionID
-                else { return }
-                self?.isFresh = false
-            }
-        }
+    private func clearPublishedGazeState() {
+        latestSample = nil
+        latestFrame = nil
+        isFresh = false
+        acceptedPacketCount = 0
+        rejectedPacketCount = 0
+        decodeErrorCount = 0
+        lastRejection = nil
+        state = .starting
     }
 }

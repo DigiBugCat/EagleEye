@@ -36,6 +36,17 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Set up Bun for VoiceOS verification
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: VoiceOS/.bun-version
+
+      - name: Verify VoiceOS integration
+        working-directory: VoiceOS
+        run: |
+          bun install --frozen-lockfile
+          bun run verify
+
       - name: Test GazeCore
         run: swift test --package-path Packages/GazeCore
 
@@ -57,6 +68,42 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           build
+
+      # Duck runs headlessly and has no per-login com.apple.testmanagerd
+      # service. Build the hosted XCTest bundle here; the same scheme is
+      # executed on a logged-in Mac in the local release gate.
+      - name: Build macOS test modules
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazeMac
+          -destination 'platform=macOS,arch=arm64'
+          ONLY_ACTIVE_ARCH=YES
+          CODE_SIGNING_ALLOWED=NO
+          build-for-testing
+
+      - name: Select an available iPhone simulator
+        shell: bash
+        run: |
+          destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhone -showdestinations)"
+          simulator_udid="$(sed -nE 's/.*platform:iOS Simulator, arch:[^,]+, id:([^,]+),.*/\1/p' <<< "$destinations" | head -1 | tr -d ' ')"
+          if [ -z "$simulator_udid" ]; then
+            echo "Duck has no iPhone simulator accepted by the EagleGazePhone scheme." >&2
+            echo "$destinations" >&2
+            exit 1
+          fi
+          xcrun simctl boot "$simulator_udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$simulator_udid" -b
+          echo "EAGLEGAZE_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+
+      - name: Test iPhone app modules
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazePhone
+          -destination "platform=iOS Simulator,id=$EAGLEGAZE_SIMULATOR_UDID"
+          CODE_SIGNING_ALLOWED=NO
+          test
 
       - name: Shut down runner-owned simulators
         if: always()
