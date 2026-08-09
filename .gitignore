@@ -8,3 +8,4 @@ build/
 *.ipa
 xcuserdata/
 .xcode.env.local
+VoiceOS/node_modules/

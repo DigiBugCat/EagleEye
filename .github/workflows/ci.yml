@@ -36,6 +36,17 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Set up Bun for VoiceOS verification
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: VoiceOS/.bun-version
+
+      - name: Verify VoiceOS integration
+        working-directory: VoiceOS
+        run: |
+          bun install --frozen-lockfile
+          bun run verify
+
       - name: Test GazeCore
         run: swift test --package-path Packages/GazeCore
 
@@ -57,6 +68,44 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           build
+
+      - name: Test macOS app modules
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazeMac
+          -destination 'platform=macOS,arch=arm64'
+          ONLY_ACTIVE_ARCH=YES
+          CODE_SIGNING_ALLOWED=NO
+          test
+
+      - name: Select an available iPhone simulator
+        shell: bash
+        run: |
+          simulator_udid="$({ xcrun simctl list devices available -j; } | /usr/bin/python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(
+              device["udid"]
+              for runtime in devices.values()
+              for device in runtime
+              if device.get("isAvailable") and "iPhone" in device.get("name", "")
+          ))
+          ')"
+          if [ -z "$simulator_udid" ]; then
+            echo "Duck has no available iPhone simulator runtime." >&2
+            exit 1
+          fi
+          echo "EAGLEGAZE_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+
+      - name: Test iPhone app modules
+        run: >-
+          xcodebuild
+          -project EagleGaze.xcodeproj
+          -scheme EagleGazePhone
+          -destination "platform=iOS Simulator,id=$EAGLEGAZE_SIMULATOR_UDID"
+          CODE_SIGNING_ALLOWED=NO
+          test
 
       - name: Shut down runner-owned simulators
         if: always()

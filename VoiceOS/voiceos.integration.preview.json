@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "description": "Safe local mock inputs used by bun run verify.",
+  "tools": {
+    "get_gaze_status": {"args": {}, "expectedGlanceBlocks": 2},
+    "start_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2},
+    "reset_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2}
+  }
+}

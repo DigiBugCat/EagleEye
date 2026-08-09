@@ -22,10 +22,11 @@
 	<string>14.0</string>
 	<key>NSBonjourServices</key>
 	<array>
+		<string>_eagle-gaze-pair._tcp</string>
 		<string>_eagle-gaze._udp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>EagleGaze receives live gaze estimates from your iPhone over your local network.</string>
+	<string>EagleGaze discovers and pairs with your iPhone, then receives live gaze estimates over your local network.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

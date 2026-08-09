@@ -13,16 +13,25 @@ struct FaceCapture: Sendable {
     let blinkRight: Float
 }
 
+/// A copied capture paired with the AR session generation that produced it.
+/// Delegate callbacks can be queued while a session is paused; consumers use
+/// this token to reject those late values after a lifecycle transition.
+struct FaceCaptureEvent: Sendable {
+    let capture: FaceCapture
+    let generation: UInt64
+}
+
 @MainActor
 final class FaceTrackingService: NSObject, ObservableObject {
     @Published private(set) var status = "Face tracking is stopped"
     @Published private(set) var isTracking = false
-    @Published private(set) var latestLookAt: SIMD3<Float>?
 
-    var onCapture: ((FaceCapture) -> Void)?
+    /// Generation-aware callback for the modular pipeline.
+    var onCaptureEvent: (@MainActor @Sendable (FaceCaptureEvent) -> Void)?
 
     private let session = ARSession()
     private let delegateQueue = DispatchQueue(label: "com.eaglegaze.phone.arkit")
+    nonisolated private let generationStore = FaceTrackingGenerationStore()
     private var isRunning = false
 
     override init() {
@@ -31,36 +40,40 @@ final class FaceTrackingService: NSObject, ObservableObject {
         session.delegateQueue = delegateQueue
     }
 
-    func start() {
-        guard !isRunning else { return }
+    @discardableResult
+    func start() -> UInt64 {
+        guard !isRunning else { return generationStore.current }
         guard ARFaceTrackingConfiguration.isSupported else {
             status = "This iPhone does not support ARKit face tracking"
             isTracking = false
-            return
+            return generationStore.current
         }
 
+        let generation = generationStore.advance()
         isRunning = true
         status = "Starting TrueDepth face tracking…"
         let configuration = ARFaceTrackingConfiguration()
         configuration.isLightEstimationEnabled = false
         session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        return generation
     }
 
     func stop() {
+        // Invalidate queued delegate work even if ARKit is already paused.
+        generationStore.advance()
         guard isRunning else { return }
         isRunning = false
         session.pause()
         isTracking = false
-        latestLookAt = nil
         status = "Face tracking is paused while the app is not active"
     }
 
-    private func receive(_ capture: FaceCapture) {
-        guard isRunning else { return }
+    private func receive(_ event: FaceCaptureEvent) {
+        guard isRunning, event.generation == generationStore.current else { return }
+        let capture = event.capture
         isTracking = capture.isTracked
-        latestLookAt = capture.lookAt
         status = capture.isTracked ? "Face and eyes are tracking" : "Face found; eye tracking is limited"
-        onCapture?(capture)
+        onCaptureEvent?(event)
     }
 }
 
@@ -79,8 +92,12 @@ extension FaceTrackingService: ARSessionDelegate {
             blinkRight: face.blendShapes[.eyeBlinkRight]?.floatValue ?? 0
         )
 
-        Task { @MainActor [weak self] in
-            self?.receive(capture)
+        // Everything crossing from the ARKit delegate queue is an immutable
+        // value. The generation is read at callback time, then checked again
+        // on the main actor before publication.
+        let event = FaceCaptureEvent(capture: capture, generation: generationStore.current)
+        Task { @MainActor [weak self, event] in
+            self?.receive(event)
         }
     }
 
@@ -89,7 +106,6 @@ extension FaceTrackingService: ARSessionDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.isRunning else { return }
             self.isTracking = false
-            self.latestLookAt = nil
             self.status = "Move your face into view of the TrueDepth camera"
         }
     }
@@ -126,5 +142,28 @@ extension FaceTrackingService: ARSessionDelegate {
             Double(matrix.columns.2.x), Double(matrix.columns.2.y), Double(matrix.columns.2.z), Double(matrix.columns.2.w),
             Double(matrix.columns.3.x), Double(matrix.columns.3.y), Double(matrix.columns.3.z), Double(matrix.columns.3.w),
         ]
+    }
+}
+
+/// Tiny lock-backed token store used only at the ARSession queue boundary.
+/// ARKit invokes delegate methods off the main actor, while lifecycle methods
+/// run on the main actor. Keeping the token in this Sendable box avoids
+/// crossing mutable actor-isolated state into a delegate callback.
+private final class FaceTrackingGenerationStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+
+    var current: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    @discardableResult
+    func advance() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        value &+= 1
+        return value
     }
 }

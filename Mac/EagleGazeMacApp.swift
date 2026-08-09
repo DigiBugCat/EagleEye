@@ -2,18 +2,26 @@ import SwiftUI
 
 @main
 struct EagleGazeMacApp: App {
-    @StateObject private var receiver = GazeReceiver()
-    @StateObject private var session = MacGazeSession()
-    @StateObject private var overlay = GazeOverlayController()
+    @StateObject private var application: EagleGazeApplication
+    @StateObject private var voiceOSBridge: VoiceOSBridge
+    @StateObject private var overlayController = GazeOverlayController()
+
+    init() {
+        let application = EagleGazeApplication()
+        _application = StateObject(wrappedValue: application)
+        _voiceOSBridge = StateObject(wrappedValue: VoiceOSBridge(service: application))
+    }
 
     var body: some Scene {
         WindowGroup("EagleGaze") {
-            MacContentView(receiver: receiver, session: session)
-                .frame(minWidth: 820, minHeight: 620)
-                .onAppear {
-                    overlay.show(session: session, receiver: receiver)
-                }
+            MacContentView(
+                application: application,
+                voiceOSBridge: voiceOSBridge,
+                overlayController: overlayController
+            )
+            .frame(minWidth: 900, minHeight: 640)
+            .onAppear { overlayController.show(application: application) }
         }
-        .defaultSize(width: 1100, height: 760)
+        .defaultSize(width: 1180, height: 780)
     }
 }
