@@ -45,8 +45,10 @@ that omitted file.
 
 There are two local hops, and neither requires entering an IP address:
 
-1. EagleGazePhone browses for `_eagle-gaze._udp` with Bonjour and automatically
-   connects to EagleGazeMac on the same local network.
+1. After QR pairing and explicit Mac selection, EagleGazePhone browses for the
+   paired Mac's `_eagle-gaze._udp` service with Bonjour, verifies its receiver
+   fingerprint, and opens a fresh authenticated stream on the same local
+   network.
 2. The VoiceOS TypeScript integration runs on that Mac and connects through
    fixed loopback (`127.0.0.1`), which is not advertised to the LAN.
 

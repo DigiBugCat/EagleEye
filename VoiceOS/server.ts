@@ -306,6 +306,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "start_gaze_evaluation",
+  {
+    title: "Start gaze evaluation",
+    description:
+      "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
+    inputSchema: {},
+  },
+  async () => await run("start_evaluation"),
+);
+
+server.registerTool(
   "reset_gaze_calibration",
   {
     title: "Reset gaze calibration",

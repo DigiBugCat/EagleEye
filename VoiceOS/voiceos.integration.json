@@ -48,6 +48,31 @@
       }
     },
     {
+      "name": "start_gaze_evaluation",
+      "title": "Start gaze evaluation",
+      "description": "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
+      "inputSchema": {"type": "object", "properties": {}},
+      "confirmation": {
+        "schemaVersion": 1,
+        "root": {
+          "type": "card",
+          "title": "Start gaze accuracy test?",
+          "children": [{
+            "type": "text",
+            "text": "EagleGaze will show a bounded set of targets and score whether your gaze reaches the intended screen regions.",
+            "variant": "body"
+          }],
+          "footer": [{
+            "type": "actions",
+            "items": [
+              {"label": "Cancel", "role": "cancel"},
+              {"label": "Start test", "role": "confirm", "color": "accent"}
+            ]
+          }]
+        }
+      }
+    },
+    {
       "name": "reset_gaze_calibration",
       "title": "Reset gaze calibration",
       "description": "Clear EagleGaze's current calibration and return it to setup. Use only when the user explicitly asks to reset or clear eye-tracking calibration.",

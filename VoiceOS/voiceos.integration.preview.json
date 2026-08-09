@@ -4,6 +4,7 @@
   "tools": {
     "get_gaze_status": {"args": {}, "expectedGlanceBlocks": 2},
     "start_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2},
+    "start_gaze_evaluation": {"args": {}, "expectedGlanceBlocks": 2},
     "reset_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2}
   }
 }

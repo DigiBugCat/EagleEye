@@ -5,7 +5,7 @@ a design change, not a small implementation detail.
 
 | Boundary | Transport | Data allowed in v0.1 | Explicitly excluded |
 | --- | --- | --- | --- |
-| iPhone → EagleGazeMac | Bonjour-discovered, versioned UDP on the local link | Ephemeral ARKit face/eye estimate required by the existing gaze prototype | Cloud relay, persistence, background capture |
+| iPhone → EagleGazeMac | Bonjour-discovered UDP on the local link, authenticated with a per-reconnect session key and replay-checked sequence | Ephemeral canonical gaze point, validity/confidence, blink state, source/session identity, sequence, and capture uptime | Raw face/eye matrices, cloud relay, gaze persistence, background capture, unauthenticated release packets |
 | EagleGazeMac → TypeScript bridge | Newline-delimited JSON over `127.0.0.1:47474` | Coarse source kind, connection state, calibration state/progress, evaluation state/counts, overlay state; reversible calibration commands | Source IDs or user names, ARKit matrices, blink values, gaze rays, normalized gaze coordinates, cursor events |
 | TypeScript MCP → VoiceOS agent | MCP over stdio | Coarse status plus 1–3 native glance blocks | Raw samples, face-derived values, continuous streams |
 | VoiceOS confirmation → acting tool | Manifest-declared confirmation card | User approval for start/reset | Programmatic approval from a widget or the model |
