@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { fileURLToPath } from "node:url";
 
 const root = new URL("./", import.meta.url);
 const manifest = await Bun.file(new URL("voiceos.integration.json", root)).json();
@@ -33,7 +34,9 @@ const childEnvironment = Object.fromEntries(
 );
 const transport = new StdioClientTransport({
   command: manifest.runtime.command,
-  args: [new URL("run.sh", root).pathname],
+  // URL.pathname leaves spaces percent-encoded. VoiceOS installs custom MCPs
+  // under "Application Support", so always convert to a filesystem path.
+  args: [fileURLToPath(new URL("run.sh", root))],
   env: childEnvironment,
 });
 const client = new Client({ name: "eaglegaze-verifier", version: "0.1.0" });
