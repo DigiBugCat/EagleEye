@@ -1,0 +1,14 @@
+EagleEye
+Copyright 2026 EagleEye contributors
+
+This Source Code Form is subject to the terms of the Mozilla Public License,
+v. 2.0. A copy of the MPL is available in the LICENSE file and at
+https://mozilla.org/MPL/2.0/.
+
+The calibration interaction and target presentation benefited from design and
+implementation exploration by William Goishi. This acknowledgement does not
+change the license or ownership of any separately maintained branch.
+
+EagleEye is an independent project. Apple, ARKit, iPhone, macOS, and TrueDepth
+are trademarks of Apple Inc. Cerebras is a trademark of Cerebras Systems Inc.
+Those companies do not endorse this project.

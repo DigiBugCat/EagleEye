@@ -2,8 +2,16 @@
 
 ## Supported versions
 
-EagleGaze is currently an experimental MVP. Only the latest revision on the
+EagleEye is currently an experimental MVP. Only the latest revision on the
 default branch receives security and privacy fixes.
+
+## Credentials and repository hygiene
+
+Do not commit API keys, pairing secrets, signing certificates, provisioning
+profiles, or captured face/gaze data. Optional provider credentials must remain
+in the operating-system Keychain and must not enter logs, fixtures, screenshots,
+bug reports, or build artifacts. If a credential is exposed, revoke it at the
+provider before attempting history cleanup.
 
 ## Saved-pair authorization boundary
 

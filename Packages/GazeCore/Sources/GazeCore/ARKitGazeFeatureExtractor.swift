@@ -87,11 +87,7 @@ public struct ARKitGazeFeatureExtractor: Sendable {
             point: Point2D(x: projectedX, y: projectedY),
             coordinateSpace: .source,
             blink: blink,
-            blinkConfidence: blinkConfidence,
-            gazeRay: GazeRay3D(
-                origin: eyeInSession,
-                direction: Vector3(x: dx, y: dy, z: dz)
-            ).normalized
+            blinkConfidence: blinkConfidence
         )
     }
 

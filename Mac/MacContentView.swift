@@ -545,23 +545,9 @@ struct MacContentView: View {
                     }
                 }
                 Text("Accepted \(application.receiver.acceptedPacketCount) • rejected \(application.receiver.rejectedPacketCount + application.receiver.decodeErrorCount)")
-                if let size = application.selectedDisplay?.physicalSize {
-                    Text("Physical display \(size.widthMeters, format: .number.precision(.fractionLength(3))) × \(size.heightMeters, format: .number.precision(.fractionLength(3))) m • full ray \(application.latestFrame?.gazeRay == nil ? "missing" : "available")")
-                }
                 Text("Calibration run \(application.snapshot.calibrationRunID?.uuidString.prefix(8) ?? "—") • epoch \(application.snapshot.targetEpoch) • rejected \(application.snapshot.rejectedSampleCount)")
                 if let dispersion = application.snapshot.targetDispersion {
                     Text("Target dispersion \(dispersion, format: .number.precision(.fractionLength(4))) • retry \(application.snapshot.targetRetryCount)")
-                }
-                if let profile = application.snapshot.profile {
-                    Text("Selected model: \(profile.quality.modelName ?? "legacy")")
-                    if let legacyRMS = profile.quality.legacyValidationRMSError,
-                       let legacyWorst = profile.quality.legacyValidationMaxError {
-                        Text("2D validation RMS \(legacyRMS, format: .number.precision(.fractionLength(4))) • perimeter worst \(legacyWorst, format: .number.precision(.fractionLength(4)))")
-                    }
-                    if let rayRMS = profile.quality.rayPlaneValidationRMSError,
-                       let rayWorst = profile.quality.rayPlaneValidationMaxError {
-                        Text("3D validation RMS \(rayRMS, format: .number.precision(.fractionLength(4))) • perimeter worst \(rayWorst, format: .number.precision(.fractionLength(4)))")
-                    }
                 }
                 if let error = application.lastError { Text(error).foregroundStyle(.red) }
             }

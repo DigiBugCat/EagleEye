@@ -1,40 +1,56 @@
-# Contributing
+# Contributing to EagleEye
 
-EagleGaze is an experimental iPhone-to-Mac gaze-tracking prototype. Changes
-should preserve its local-only data boundary and distinguish measured results
-from assumptions.
+EagleEye is an experimental gaze-tracking project. Contributions are welcome,
+especially when they improve measurement quality, calibration robustness,
+accessibility, local-network security, or privacy boundaries.
 
-## Development setup
+## License for contributions
 
-1. Use a Mac with Xcode and an ARKit face-tracking-capable iPhone.
-2. Run the shared package tests:
+The project is licensed under the Mozilla Public License 2.0. By submitting a
+contribution, you agree that your contribution is licensed under MPL-2.0 and
+that you have the right to provide it under those terms. No copyright assignment
+or contributor license agreement is required.
 
-   ```sh
-   swift test --package-path Packages/GazeCore
-   ```
+Do not submit third-party code, assets, research datasets, or generated material
+unless its license permits inclusion under this repository's terms. Preserve
+existing copyright and attribution notices.
 
-3. Compile both app targets without signing:
+## Security and sensitive data
 
-   ```sh
-   xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazeMac \
-     -destination 'platform=macOS' ONLY_ACTIVE_ARCH=YES \
-     CODE_SIGNING_ALLOWED=NO build
+Never commit API keys, signing certificates, provisioning profiles, pairing
+secrets, device captures, face-derived data, or real gaze-session payloads.
+Provider credentials belong in the operating-system Keychain. Use synthetic
+fixtures in tests.
 
-   xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhone \
-     -destination 'generic/platform=iOS Simulator' \
-     CODE_SIGNING_ALLOWED=NO build
-   ```
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Do not open a public issue containing a credential or another person's
+face-derived data.
 
-ARKit face tracking itself requires a supported physical device and does not
-run in Simulator.
+## Development workflow
 
-## Pull requests
+Keep changes focused and explain any user-visible tradeoff. Calibration changes
+should include independent validation rather than only training-set accuracy.
+Security or wire-format changes should include negative tests for malformed,
+replayed, stale, or unauthenticated input.
 
-- Keep changes focused and include tests for protocol, calibration, filtering,
-  or sample-gating behavior.
-- Document the device, OS, mounting position, distance, and evaluation method
-  behind accuracy claims.
-- Do not add analytics, cloud transmission, persistence of gaze samples, or
-  cursor injection without an explicit design and privacy review.
-- Never commit signing certificates, provisioning profiles, captured face data,
-  or Apple account credentials.
+Before opening a pull request, run:
+
+```sh
+cd Packages/GazeCore
+swift test
+
+cd ../..
+xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazeMacTests \
+  -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO test
+
+xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhoneTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' \
+  CODE_SIGNING_ALLOWED=NO test
+
+cd VoiceOS
+bun run verify
+```
+
+Physical-device validation remains necessary for ARKit behavior because face
+tracking is unavailable in Simulator. State clearly which platforms and devices
+you actually tested.

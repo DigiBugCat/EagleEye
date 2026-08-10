@@ -647,22 +647,12 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
                 displayID: selectedDisplayID,
                 setupID: setupID,
                 coordinateSpace: activeSource?.capabilities.contains(.displayNormalizedCoordinates) == true
-                    ? .displayNormalized : .source,
-                screenSizeMeters: selectedDisplay?.physicalSize
+                    ? .displayNormalized : .source
             )
             geometryMonitor.reset()
             geometryAssessment = nil
             lastLoggedGeometryStatus = .stable
             lastError = nil
-            if let size = selectedDisplay?.physicalSize {
-                macApplicationLog.notice(
-                    "Calibration geometry enabled display=\(self.selectedDisplayID, privacy: .public) widthM=\(size.widthMeters, format: .fixed(precision: 3), privacy: .public) heightM=\(size.heightMeters, format: .fixed(precision: 3), privacy: .public)"
-                )
-            } else {
-                macApplicationLog.warning(
-                    "Calibration geometry unavailable display=\(self.selectedDisplayID, privacy: .public); 2D candidate only"
-                )
-            }
         } catch { lastError = error.localizedDescription }
     }
 
@@ -684,18 +674,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
 
     private func updateGeometryAssessment(from frame: CanonicalGazeFrame) {
         guard snapshot.phase == .calibrated || snapshot.phase == .complete || snapshot.phase == .evaluating,
-              let profile = snapshot.profile else { return }
-        // A selected ray-plane model explicitly includes eye origin, so normal
-        // seating translation is no longer evidence that its mapping is stale.
-        // Physical phone/display movement remains a manual recalibration event
-        // until the deferred device-motion detector is implemented.
-        if profile.selectedModel == .rayPlane3D {
-            geometryAssessment = nil
-            geometryMonitor.reset()
-            lastLoggedGeometryStatus = .stable
-            return
-        }
-        guard let baseline = profile.geometryBaseline,
+              let baseline = snapshot.profile?.geometryBaseline,
               let current = frame.trackingMetrics?.geometry,
               let assessment = geometryMonitor.update(current: current, baseline: baseline) else { return }
         geometryAssessment = assessment

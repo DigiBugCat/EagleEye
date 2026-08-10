@@ -161,14 +161,13 @@ final class PhoneGazePipeline {
             blink: extractedFrame.blink,
             blinkConfidence: extractedFrame.blinkConfidence,
             trackingRunID: generation,
-            trackingMetrics: metrics,
-            gazeRay: extractedFrame.gazeRay
+            trackingMetrics: metrics
         )
         sequence = nextSequence
         if !hasLoggedFirstFrame {
             hasLoggedFirstFrame = true
             phonePipelineLog.notice(
-                "First canonical gaze frame produced generation=\(generation, privacy: .public) session=\(sessionID.uuidString.prefix(8), privacy: .public) tracked=\(capture.isTracked, privacy: .public) fullRay=\(frame.gazeRay != nil, privacy: .public)"
+                "First canonical gaze frame produced generation=\(generation, privacy: .public) session=\(sessionID.uuidString.prefix(8), privacy: .public) tracked=\(capture.isTracked, privacy: .public)"
             )
         }
         onFrame?(frame)
