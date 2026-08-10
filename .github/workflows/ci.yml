@@ -53,12 +53,27 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
+      - name: Select an available iPhone simulator
+        shell: bash
+        run: |
+          destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhoneTests -showdestinations)"
+          simulator_udid="$(sed -nE 's/.*platform:iOS Simulator, arch:[^,]+, id:([^,]+),.*name:iPhone[^}]*}.*/\1/p' <<< "$destinations" | head -1 | tr -d ' ')"
+          if [ -z "$simulator_udid" ]; then
+            echo "The runner has no iPhone simulator accepted by the EagleGazePhoneTests scheme." >&2
+            echo "$destinations" >&2
+            exit 1
+          fi
+          xcrun simctl boot "$simulator_udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$simulator_udid" -b
+          echo "EAGLEGAZE_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+
       - name: Build iOS app
         run: >-
           xcodebuild
           -project EagleGaze.xcodeproj
           -scheme EagleGazePhone
-          -destination 'generic/platform=iOS Simulator'
+          -destination "platform=iOS Simulator,id=$EAGLEGAZE_SIMULATOR_UDID"
+          ONLY_ACTIVE_ARCH=YES
           CODE_SIGNING_ALLOWED=NO
           build
 
@@ -71,26 +86,13 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           test
 
-      - name: Select an available iPhone simulator
-        shell: bash
-        run: |
-          destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhoneTests -showdestinations)"
-          simulator_udid="$(sed -nE 's/.*platform:iOS Simulator, arch:[^,]+, id:([^,]+),.*/\1/p' <<< "$destinations" | head -1 | tr -d ' ')"
-          if [ -z "$simulator_udid" ]; then
-            echo "The runner has no iPhone simulator accepted by the EagleGazePhoneTests scheme." >&2
-            echo "$destinations" >&2
-            exit 1
-          fi
-          xcrun simctl boot "$simulator_udid" 2>/dev/null || true
-          xcrun simctl bootstatus "$simulator_udid" -b
-          echo "EAGLEGAZE_SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
-
       - name: Test iPhone app modules
         run: >-
           xcodebuild
           -project EagleGaze.xcodeproj
           -scheme EagleGazePhoneTests
           -destination "platform=iOS Simulator,id=$EAGLEGAZE_SIMULATOR_UDID"
+          ONLY_ACTIVE_ARCH=YES
           CODE_SIGNING_ALLOWED=NO
           test
 
