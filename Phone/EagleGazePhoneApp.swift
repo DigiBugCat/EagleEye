@@ -1,6 +1,9 @@
 import SwiftUI
 import GazeCore
+import OSLog
 import UIKit
+
+private let phoneLifecycleLog = Logger(subsystem: "com.aviary.EagleGazePhone", category: "lifecycle")
 
 @main
 struct EagleGazePhoneApp: App {
@@ -34,44 +37,42 @@ private final class UIApplicationIdleTimerController: PhoneIdleTimerControlling 
 
 /// Main-actor composition root for the phone.  It owns no ARKit or network
 /// details: those are injected through the tracker, pipeline, sender, and the
-/// pairing-session boundary.  In particular, a foreground transition never
-/// starts ARKit until consent and a fresh authenticated session are present.
+/// pairing-session boundary. A saved pairing is the user's durable choice of
+/// destination; every foreground launch derives a fresh encrypted session.
 @MainActor
 final class PhoneAppModel: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var streamSessionID: UUID?
     @Published private(set) var pairedReceivers: [PairedReceiver] = []
     @Published private(set) var selectedReceiver: PairedReceiver?
-    @Published private(set) var consent: PhoneOffDeviceGazeConsent?
     @Published private(set) var streamStatus = "Pair a Mac to begin"
     @Published private(set) var pairingStatus = ""
-    @Published var isPairingScannerPresented = false
-
-    var hasConsentForSelectedReceiver: Bool {
-        guard let receiver = selectedReceiver,
-              consent?.destinationID == receiver.pairID.uuidString
-        else { return false }
-        return consentCoordinator.currentAuthorization?.destinationID == receiver.pairID.uuidString
-    }
+    @Published private(set) var nearbyMacs: [PairingControlCandidate] = []
+    @Published private(set) var pairingVerificationCode: String?
+    @Published private(set) var isDiscoveringNearbyMacs = false
+    @Published private(set) var isPairingNearbyMac = false
+    @Published private(set) var authenticationNeedsRepair = false
+    @Published var isNearbyPairingPresented = false
 
     let faceTracking: FaceTrackingService
     let sender: GazeSender
     let pipeline: PhoneGazePipeline
-    let consentCoordinator: PhonePrivacyConsentCoordinator
     let catalog: PairedReceiverCatalog
     let pairingSessionClient: PhonePairingSessionClient
-    private(set) var qrScanner: QRScannerCoordinator?
 
     private let pairedStore: PairedReceiverStore
-    private let consentStore: PhonePrivacyConsentStore
     private let identityStore: PhoneDeviceIdentityStore
     private let hasStableIdentity: Bool
     private let lifecycle: PhoneLifecycleCoordinator
-    private let offerParser = PairingOfferParser()
     private var activeSession: GazeSessionMaterial?
     private var foregroundRequested = false
     private var sessionTask: Task<Void, Never>?
-    private var scannerPausedRunning = false
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryAttempt = 0
+    private var pairingTask: Task<Void, Never>?
+    private var receiverBeingRepaired: PairedReceiver?
+
+    var isRepairingConnection: Bool { receiverBeingRepaired != nil }
 
     init(
         faceTracking: FaceTrackingService = FaceTrackingService(),
@@ -79,16 +80,13 @@ final class PhoneAppModel: ObservableObject {
         pipeline: PhoneGazePipeline? = nil,
         idleTimer: PhoneIdleTimerControlling = UIApplicationIdleTimerController(),
         pairedStore: PairedReceiverStore? = nil,
-        consentStore: PhonePrivacyConsentStore = KeychainPhonePrivacyConsentStore(),
         identityStore: PhoneDeviceIdentityStore? = nil,
-        pairingSessionClient: PhonePairingSessionClient? = nil,
-        qrScannerBoundary: QRScannerBoundary? = nil
+        pairingSessionClient: PhonePairingSessionClient? = nil
     ) {
         self.faceTracking = faceTracking
         self.sender = sender
         let resolvedPairedStore = pairedStore ?? Self.makeDefaultPairedReceiverStore()
         self.pairedStore = resolvedPairedStore
-        self.consentStore = consentStore
         let resolvedIdentityStore = identityStore ?? Self.makeDefaultIdentityStore()
         self.identityStore = resolvedIdentityStore
         let identity = try? resolvedIdentityStore.loadOrCreate(displayName: "Eagle Gaze iPhone")
@@ -98,7 +96,6 @@ final class PhoneAppModel: ObservableObject {
         )
         self.pipeline = resolvedPipeline
         self.catalog = PairedReceiverCatalog(store: resolvedPairedStore)
-        self.consentCoordinator = PhonePrivacyConsentCoordinator(store: consentStore)
         self.pairingSessionClient = pairingSessionClient ?? Self.makeDefaultPairingSessionClient(
             identityStore: resolvedIdentityStore,
             receiverStore: resolvedPairedStore
@@ -122,33 +119,20 @@ final class PhoneAppModel: ObservableObject {
             idleTimer: idleTimer
         )
 
-        if let scanner = qrScannerBoundary ?? Self.makeDefaultQRScanner() {
-            let coordinator = QRScannerCoordinator(
-                scanner: scanner,
-                pauseARKit: { [weak self] in self?.pauseForPairingScanner() },
-                resumeARKit: { [weak self] in self?.resumeAfterPairingScanner() }
-            )
-            self.qrScanner = coordinator
-            coordinator.onPayload = { [weak self] payload in
-                self?.handlePairingPayload(payload)
-            }
-        } else {
-            self.qrScanner = nil
-        }
-
-        consentCoordinator.setRevocationHandler { [weak self] in
-            Task { @MainActor in self?.stopForConsentRevocation() }
+        sender.onRecoveryNeeded = { [weak self] detail in
+            self?.scheduleAutomaticRecovery(reason: detail)
         }
         refreshCatalog()
-        restoreConsent()
     }
 
     /// Scene lifecycle entry point. `.inactive` intentionally does nothing;
     /// backgrounding invalidates the camera and authenticated stream.
     func handleScenePhase(_ phase: ScenePhase) {
+        phoneLifecycleLog.info("Scene phase changed phase=\(String(describing: phase), privacy: .public)")
         switch phase {
         case .active:
             foregroundRequested = true
+            recoveryAttempt = 0
             start()
         case .inactive:
             break
@@ -161,29 +145,34 @@ final class PhoneAppModel: ObservableObject {
         }
     }
 
-    /// Requests a foreground stream. It is a no-op until a selected receiver,
-    /// matching consent, and a fresh session material have all been obtained.
+    /// Requests a foreground stream. A saved receiver is authenticated with a
+    /// fresh session before TrueDepth frame production begins.
     func start() {
         guard foregroundRequested || !isRunning else { return }
         foregroundRequested = true
         guard let receiver = selectedReceiver else {
+            phoneLifecycleLog.info("Stream start gated reason=no-selected-receiver")
             streamStatus = pairedReceivers.count > 1
                 ? "Choose which paired Mac should receive gaze"
                 : "Pair a Mac to begin"
             return
         }
         guard hasStableIdentity else {
+            phoneLifecycleLog.error("Stream start gated reason=identity-unavailable")
             streamStatus = "Waiting for a protected phone identity before streaming"
             return
         }
-        guard (try? consentCoordinator.authorizeStreaming(to: receiver.pairID.uuidString)) != nil else {
-            streamStatus = "Consent is required before gaze can leave this iPhone"
-            return
-        }
-
+        recoveryTask?.cancel()
+        recoveryTask = nil
         sessionTask?.cancel()
         activeSession = nil
+        authenticationNeedsRepair = false
+        lifecycle.prepareForSessionReplacement()
+        sender.clearReceiverSelection()
+        isRunning = lifecycle.isRunning
+        streamSessionID = lifecycle.streamSessionID
         streamStatus = "Waiting for a fresh authenticated session…"
+        phoneLifecycleLog.info("Stream authentication requested receiver=\(receiver.displayName, privacy: .public)")
         // Bonjour discovery may run while the control handshake is pending,
         // but no gaze frames are accepted until sender selection succeeds.
         sender.start()
@@ -199,16 +188,23 @@ final class PhoneAppModel: ObservableObject {
                 )
                 guard self.foregroundRequested,
                       self.selectedReceiver?.pairID == receiver.pairID,
-                      self.consentCoordinator.currentAuthorization?.destinationID == receiver.pairID.uuidString,
                       session.sessionID == requestedSessionID
                 else { return }
+                // The authenticated control exchange proves which Mac is
+                // trusted. Refresh the separate UDP Bonjour browse now so an
+                // endpoint cached from a previous Mac process cannot win.
+                self.sender.restartDiscovery()
                 var discovered: DiscoveredGazeReceiver?
-                for _ in 0..<20 {
-                    if let candidate = self.sender.discoveredReceivers.values.first(where: {
+                for _ in 0..<50 {
+                    let candidates = self.sender.discoveredReceivers.values.filter {
                         $0.receiverFingerprint == receiver.receiverFingerprint
-                    }) {
-                        discovered = candidate
+                    }
+                    if candidates.count == 1 {
+                        discovered = candidates[0]
                         break
+                    }
+                    if candidates.count > 1 {
+                        phoneLifecycleLog.warning("Waiting for stale duplicate gaze receivers to expire count=\(candidates.count, privacy: .public)")
                     }
                     try? await Task.sleep(for: .milliseconds(100))
                 }
@@ -225,11 +221,19 @@ final class PhoneAppModel: ObservableObject {
                 self.isRunning = self.lifecycle.isRunning
                 self.streamSessionID = self.lifecycle.streamSessionID
                 self.streamStatus = "Ready — sending canonical gaze status to \(receiver.displayName)"
+                self.authenticationNeedsRepair = false
+                self.recoveryAttempt = 0
+                self.recoveryTask?.cancel()
+                self.recoveryTask = nil
+                phoneLifecycleLog.notice("Authenticated gaze session active receiver=\(receiver.displayName, privacy: .public) session=\(requestedSessionID.uuidString.prefix(8), privacy: .public)")
             } catch {
                 self.activeSession = nil
                 self.isRunning = false
                 self.streamSessionID = nil
-                self.streamStatus = "Waiting for Mac authentication: \(error.localizedDescription)"
+                self.authenticationNeedsRepair = false
+                self.streamStatus = "Reconnecting securely to \(receiver.displayName)…"
+                phoneLifecycleLog.error("Gaze session authentication failed receiver=\(receiver.displayName, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                self.scheduleAutomaticRecovery(reason: error.localizedDescription)
             }
         }
     }
@@ -237,12 +241,13 @@ final class PhoneAppModel: ObservableObject {
     /// Stops camera and network work and invalidates queued frames. Calling
     /// this more than once is safe and still leaves the idle timer enabled.
     func stop() {
+        phoneLifecycleLog.info("Stream stopping")
         sessionTask?.cancel()
         sessionTask = nil
-        if qrScanner?.isScanning == true {
-            qrScanner?.stop()
-            isPairingScannerPresented = false
-        }
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryAttempt = 0
+        pairingTask?.cancel()
         activeSession = nil
         lifecycle.stop()
         isRunning = lifecycle.isRunning
@@ -278,30 +283,9 @@ final class PhoneAppModel: ObservableObject {
             streamSessionID = lifecycle.streamSessionID
         }
         selectedReceiver = receiver
-        if (try? consentCoordinator.authorizeStreaming(to: receiver.pairID.uuidString)) == nil {
-            streamStatus = "Consent is required before gaze can leave this iPhone"
-        }
+        authenticationNeedsRepair = false
+        phoneLifecycleLog.info("Receiver selected name=\(receiver.displayName, privacy: .public)")
         if foregroundRequested { start() }
-    }
-
-    func grantConsentForSelectedReceiver() {
-        guard let receiver = selectedReceiver else { return }
-        do {
-            let value = try PhoneOffDeviceGazeConsent(destinationID: receiver.pairID.uuidString)
-            _ = try consentCoordinator.grant(value)
-            consent = value
-            streamStatus = "Consent saved for \(receiver.displayName)"
-            if foregroundRequested { start() }
-        } catch {
-            streamStatus = "Could not save consent: \(error.localizedDescription)"
-        }
-    }
-
-    func revokeConsent() {
-        do { try consentCoordinator.revoke() }
-        catch { streamStatus = "Consent revoked locally; storage reported an error" }
-        consent = nil
-        stopForConsentRevocation()
     }
 
     func revoke(receiver: PairedReceiver) {
@@ -310,95 +294,110 @@ final class PhoneAppModel: ObservableObject {
             try catalog.revoke(pairID: receiver.pairID)
             if selectedReceiver?.pairID == receiver.pairID { selectedReceiver = nil }
             refreshCatalog()
-            if consent?.destinationID == receiver.pairID.uuidString { revokeConsent() }
             pairingStatus = "Revoked \(receiver.displayName)"
         } catch {
             pairingStatus = "Could not revoke \(receiver.displayName)"
         }
     }
 
-    func presentPairingScanner() {
-        guard qrScanner != nil else {
-            pairingStatus = "QR scanning is unavailable on this device"
+    func refreshNearbyMacs() {
+        guard !isDiscoveringNearbyMacs, !isPairingNearbyMac else { return }
+        isDiscoveringNearbyMacs = true
+        pairingStatus = "Looking for nearby Macs…"
+        phoneLifecycleLog.info("User requested nearby Mac discovery")
+        pairingTask?.cancel()
+        pairingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                nearbyMacs = try await pairingSessionClient.discoverNearbyMacs()
+                pairingStatus = nearbyMacs.isEmpty
+                    ? "No EagleGaze Macs found on the nearby network"
+                    : "Choose a Mac to pair"
+            } catch {
+                nearbyMacs = []
+                pairingStatus = "Could not discover nearby Macs: \(error.localizedDescription)"
+            }
+            isDiscoveringNearbyMacs = false
+        }
+    }
+
+    func pair(with candidate: PairingControlCandidate) {
+        guard !isPairingNearbyMac else { return }
+        isPairingNearbyMac = true
+        pairingVerificationCode = nil
+        pairingStatus = "Connecting to \(candidate.displayName)…"
+        pairingTask?.cancel()
+        pairingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let receiver = try await pairingSessionClient.pair(
+                    candidate: candidate,
+                    displayName: "Eagle Gaze iPhone",
+                    onVerificationCode: { [weak self] code in
+                        self?.pairingVerificationCode = code
+                        self?.pairingStatus = "Confirm this code on the Mac, then approve"
+                    }
+                )
+                let replacedReceiver = receiverBeingRepaired
+                if let replacedReceiver, replacedReceiver.pairID != receiver.pairID {
+                    try catalog.revoke(pairID: replacedReceiver.pairID)
+                    phoneLifecycleLog.notice("Saved pairing repaired old=\(replacedReceiver.displayName, privacy: .public) new=\(receiver.displayName, privacy: .public)")
+                }
+                receiverBeingRepaired = nil
+                refreshCatalog()
+                select(receiver: receiver)
+                pairingStatus = "Paired \(receiver.displayName)"
+                pairingVerificationCode = nil
+                isNearbyPairingPresented = false
+            } catch {
+                pairingVerificationCode = nil
+                pairingStatus = "Pairing failed: \(error.localizedDescription)"
+                phoneLifecycleLog.error("Pairing failed candidate=\(candidate.displayName, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
+            isPairingNearbyMac = false
+        }
+    }
+
+    func retryAuthentication() {
+        phoneLifecycleLog.info("User requested authentication retry")
+        recoveryAttempt = 0
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        start()
+    }
+
+    func beginPairingRepair() {
+        receiverBeingRepaired = selectedReceiver
+        isNearbyPairingPresented = true
+        pairingStatus = "Choose this Mac again to replace the saved connection"
+        phoneLifecycleLog.notice("User began saved-pairing repair")
+        refreshNearbyMacs()
+    }
+
+    func cancelNearbyPairing() {
+        receiverBeingRepaired = nil
+        isNearbyPairingPresented = false
+        pairingVerificationCode = nil
+        phoneLifecycleLog.info("Nearby pairing sheet dismissed")
+    }
+
+    private func scheduleAutomaticRecovery(reason: String) {
+        guard foregroundRequested, selectedReceiver != nil, recoveryTask == nil else { return }
+        guard recoveryAttempt < 5 else {
+            authenticationNeedsRepair = true
+            streamStatus = "Couldn’t reconnect automatically. Retry, or repair the saved Mac if its identity changed."
+            phoneLifecycleLog.error("Automatic recovery exhausted reason=\(reason, privacy: .public)")
             return
         }
-        isPairingScannerPresented = true
-    }
-
-    func startPairingScanner() throws {
-        guard let qrScanner else { throw QRScannerError.cameraUnavailable }
-        try qrScanner.start()
-    }
-
-    func stopPairingScanner() {
-        qrScanner?.stop()
-        isPairingScannerPresented = false
-    }
-
-    private func pauseForPairingScanner() {
-        scannerPausedRunning = lifecycle.isRunning
-        lifecycle.pauseForPresentation()
-        isRunning = lifecycle.isRunning
-        streamSessionID = lifecycle.streamSessionID
-    }
-
-    private func resumeAfterPairingScanner() {
-        guard scannerPausedRunning else { return }
-        scannerPausedRunning = false
-        if foregroundRequested { start() }
-    }
-
-    private func handlePairingPayload(_ payload: String) {
-        pairingStatus = "Validating Mac pairing offer…"
-        do {
-            let offer = try offerParser.parse(payload)
-            pairingStatus = "Offer validated; waiting for authenticated Mac approval…"
-            sessionTask?.cancel()
-            sessionTask = Task { @MainActor [weak self] in
-                guard let self else { return }
-                do {
-                    let receiver = try await self.pairingSessionClient.pair(
-                        offer: offer,
-                        displayName: "Eagle Gaze iPhone"
-                    )
-                    // A returned receiver is proof the injected client has
-                    // completed the transcript and Mac approval. The pairing
-                    // client owns durable persistence; this root never stores
-                    // QR text or a pre-authenticated record.
-                    self.refreshCatalog()
-                    self.select(receiver: receiver)
-                    self.pairingStatus = "Paired \(receiver.displayName)"
-                } catch {
-                    self.pairingStatus = "Waiting for Mac pairing handshake: \(error.localizedDescription)"
-                }
-            }
-        } catch {
-            pairingStatus = "Invalid or expired pairing QR: \(error.localizedDescription)"
+        let delayMilliseconds = min(8_000, 500 * (1 << recoveryAttempt))
+        recoveryAttempt += 1
+        phoneLifecycleLog.info("Automatic recovery scheduled attempt=\(self.recoveryAttempt, privacy: .public) delayMs=\(delayMilliseconds, privacy: .public) reason=\(reason, privacy: .public)")
+        recoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+            guard !Task.isCancelled, let self, self.foregroundRequested else { return }
+            self.recoveryTask = nil
+            self.start()
         }
-    }
-
-    private func restoreConsent() {
-        // Load the disclosure for presentation only; authorization remains
-        // destination-scoped and is rehydrated in start().
-        consent = try? consentStore.load()
-    }
-
-    private func stopForConsentRevocation() {
-        sessionTask?.cancel()
-        activeSession = nil
-        lifecycle.stop()
-        sender.clearReceiverSelection()
-        isRunning = false
-        streamSessionID = nil
-        streamStatus = "Consent is required before gaze can leave this iPhone"
-    }
-
-    private static func makeDefaultQRScanner() -> QRScannerBoundary? {
-        #if canImport(AVFoundation)
-        return AVFoundationQRScanner()
-        #else
-        return nil
-        #endif
     }
 
     private static func makeDefaultPairedReceiverStore() -> PairedReceiverStore {

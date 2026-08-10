@@ -164,6 +164,58 @@ public enum BlinkState: String, Codable, Equatable, Sendable {
     case unknown
 }
 
+/// Source-independent pose evidence used to recognize when the physical
+/// phone/face geometry has changed enough that a saved calibration is no
+/// longer trustworthy. Values are expressed in the source camera's metric
+/// coordinate system; consumers compare relative deltas rather than assuming
+/// that a particular mount is above or below the display.
+public struct GazeGeometrySample: Codable, Equatable, Sendable {
+    public let facePosition: Vector3
+    public let faceForward: Vector3
+    public let eyeSeparation: Double
+
+    public init(facePosition: Vector3, faceForward: Vector3, eyeSeparation: Double) {
+        self.facePosition = facePosition
+        self.faceForward = faceForward
+        self.eyeSeparation = eyeSeparation
+    }
+
+    public var isFinite: Bool {
+        [facePosition.x, facePosition.y, facePosition.z,
+         faceForward.x, faceForward.y, faceForward.z,
+         eyeSeparation].allSatisfy(\.isFinite)
+            && eyeSeparation > 0
+    }
+}
+
+/// Per-frame tracking evidence. `confidence` on the canonical frame remains a
+/// validity/reliability signal; these metrics let calibration make explicit,
+/// explainable decisions about blinks, eye availability, and head motion.
+public struct GazeTrackingMetrics: Codable, Equatable, Sendable {
+    public let bothEyesUsable: Bool
+    public let headAngularVelocity: Double
+    public let headLinearVelocity: Double
+    public let geometry: GazeGeometrySample?
+
+    public init(
+        bothEyesUsable: Bool,
+        headAngularVelocity: Double,
+        headLinearVelocity: Double,
+        geometry: GazeGeometrySample? = nil
+    ) {
+        self.bothEyesUsable = bothEyesUsable
+        self.headAngularVelocity = headAngularVelocity
+        self.headLinearVelocity = headLinearVelocity
+        self.geometry = geometry
+    }
+
+    public var isFinite: Bool {
+        headAngularVelocity.isFinite
+            && headLinearVelocity.isFinite
+            && (geometry?.isFinite ?? true)
+    }
+}
+
 /// Source-independent gaze observation consumed by calibration, smoothing, and
 /// presentation.  Raw ARKit transforms never cross this boundary.
 public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
@@ -177,6 +229,10 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
     public let coordinateSpace: GazeCoordinateSpace
     public let blink: BlinkState?
     public let blinkConfidence: Double?
+    /// AR session generation, used to prevent delayed frames from an earlier
+    /// tracking run from leaking into a new calibration target epoch.
+    public let trackingRunID: UInt64?
+    public let trackingMetrics: GazeTrackingMetrics?
 
     /// Convenience spelling used by consumers that call the source session
     /// simply `sessionID` (the wire model uses that spelling).
@@ -192,7 +248,9 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         point: Point2D,
         coordinateSpace: GazeCoordinateSpace,
         blink: BlinkState? = nil,
-        blinkConfidence: Double? = nil
+        blinkConfidence: Double? = nil,
+        trackingRunID: UInt64? = nil,
+        trackingMetrics: GazeTrackingMetrics? = nil
     ) {
         self.sourceID = sourceID
         self.sourceSessionID = sourceSessionID
@@ -204,6 +262,8 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         self.coordinateSpace = coordinateSpace
         self.blink = blink
         self.blinkConfidence = blinkConfidence
+        self.trackingRunID = trackingRunID
+        self.trackingMetrics = trackingMetrics
     }
 
     public init(
@@ -216,7 +276,9 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         point: Point2D,
         coordinateSpace: GazeCoordinateSpace,
         blink: BlinkState? = nil,
-        blinkConfidence: Double? = nil
+        blinkConfidence: Double? = nil,
+        trackingRunID: UInt64? = nil,
+        trackingMetrics: GazeTrackingMetrics? = nil
     ) {
         self.init(
             sourceID: sourceID,
@@ -228,7 +290,9 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
             point: point,
             coordinateSpace: coordinateSpace,
             blink: blink,
-            blinkConfidence: blinkConfidence
+            blinkConfidence: blinkConfidence,
+            trackingRunID: trackingRunID,
+            trackingMetrics: trackingMetrics
         )
     }
 }

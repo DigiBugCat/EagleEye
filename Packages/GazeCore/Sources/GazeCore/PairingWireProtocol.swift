@@ -102,11 +102,67 @@ private func appendWireData(_ value: Data?, to data: inout Data) {
     if let value { data.append(value) }
 }
 
-/// A request sent after a phone has scanned the Mac's QR offer.  The offer
-/// fields are carried explicitly so the Mac can reject a request for a
-/// different/stale offer before doing key agreement.  This DTO contains no
-/// durable key material.
-public struct PairingQRRequest: Codable, Equatable, Sendable {
+/// Opens a one-time nearby pairing exchange with a discovered Mac. The
+/// request identifier binds the response to this connection attempt without
+/// exposing any device identity or durable key material.
+public struct NearbyPairingOfferRequest: Codable, Equatable, Sendable {
+    public let version: Int
+    public let requestID: UUID
+
+    public init(
+        version: Int = PairingWireProtocol.currentVersion,
+        requestID: UUID = UUID()
+    ) throws {
+        try requireVersion(version)
+        guard nonZero(requestID) else { throw PairingWireError.invalidID }
+        self.version = version
+        self.requestID = requestID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            version: container.decode(Int.self, forKey: .version),
+            requestID: container.decode(UUID.self, forKey: .requestID)
+        )
+    }
+}
+
+/// Returns the Mac's short-lived key-agreement offer over the selected
+/// Bonjour connection. Authenticity is confirmed by the six-digit transcript
+/// value shown independently on both devices before Mac approval.
+public struct NearbyPairingOfferResponse: Codable, Equatable, Sendable {
+    public let version: Int
+    public let requestID: UUID
+    public let offer: PairingOffer
+
+    public init(
+        version: Int = PairingWireProtocol.currentVersion,
+        requestID: UUID,
+        offer: PairingOffer
+    ) throws {
+        try requireVersion(version)
+        guard nonZero(requestID) else { throw PairingWireError.invalidID }
+        try offer.validate()
+        self.version = version
+        self.requestID = requestID
+        self.offer = offer
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            version: container.decode(Int.self, forKey: .version),
+            requestID: container.decode(UUID.self, forKey: .requestID),
+            offer: container.decode(PairingOffer.self, forKey: .offer)
+        )
+    }
+}
+
+/// Carries the phone's authenticated response to the Mac's one-time nearby
+/// offer. The offer fields are repeated so the Mac rejects a different or
+/// stale exchange before doing key agreement. This DTO has no durable key.
+public struct PairingInitiationRequest: Codable, Equatable, Sendable {
     public let version: Int
     public let offerID: UUID
     public let receiverFingerprint: String
@@ -165,7 +221,7 @@ public struct PairingQRRequest: Codable, Equatable, Sendable {
         self.transcriptMAC = transcriptMAC
     }
 
-    /// Convenience initializer from the shared QR offer model.
+    /// Convenience initializer from the shared short-lived offer model.
     public init(
         offer: PairingOffer,
         initiatorDeviceID: UUID,
@@ -229,7 +285,7 @@ public enum PairingResponseStatus: String, Codable, Equatable, Sendable {
     case rejected
 }
 
-/// Mac response to a QR request.  Approved metadata is sufficient to create
+/// Mac response to a nearby pairing request. Approved metadata is sufficient to create
 /// a `PairedDeviceRecord` after both sides derive pairingKey independently;
 /// pairingKey is intentionally not a field of this type.
 public struct PairingMacResponse: Codable, Equatable, Sendable {
@@ -389,7 +445,9 @@ public typealias PairingRejectedResponse = PairingMacResponse
 /// before decoding the payload; each nested DTO still performs its own strict
 /// validation.  The payload is an object (not base64 bytes) on the wire.
 public enum PairingControlMessage: Codable, Equatable, Sendable {
-    case qrRequest(PairingQRRequest)
+    case nearbyOfferRequest(NearbyPairingOfferRequest)
+    case nearbyOfferResponse(NearbyPairingOfferResponse)
+    case pairingRequest(PairingInitiationRequest)
     case macResponse(PairingMacResponse)
     case reconnectChallenge(ReconnectChallenge)
     case reconnectResponse(ReconnectResponse)
@@ -397,7 +455,8 @@ public enum PairingControlMessage: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case version, type, payload }
     private enum Kind: String, Codable {
-        case qrRequest, macResponse, reconnectChallenge, reconnectResponse, reconnectConfirmation
+        case nearbyOfferRequest, nearbyOfferResponse, pairingRequest, macResponse
+        case reconnectChallenge, reconnectResponse, reconnectConfirmation
     }
 
     public var version: Int { PairingWireProtocol.currentVersion }
@@ -407,7 +466,11 @@ public enum PairingControlMessage: Codable, Equatable, Sendable {
         let version = try container.decode(Int.self, forKey: .version)
         try requireVersion(version)
         switch try container.decode(Kind.self, forKey: .type) {
-        case .qrRequest: self = .qrRequest(try container.decode(PairingQRRequest.self, forKey: .payload))
+        case .nearbyOfferRequest:
+            self = .nearbyOfferRequest(try container.decode(NearbyPairingOfferRequest.self, forKey: .payload))
+        case .nearbyOfferResponse:
+            self = .nearbyOfferResponse(try container.decode(NearbyPairingOfferResponse.self, forKey: .payload))
+        case .pairingRequest: self = .pairingRequest(try container.decode(PairingInitiationRequest.self, forKey: .payload))
         case .macResponse: self = .macResponse(try container.decode(PairingMacResponse.self, forKey: .payload))
         case .reconnectChallenge: self = .reconnectChallenge(try container.decode(ReconnectChallenge.self, forKey: .payload))
         case .reconnectResponse: self = .reconnectResponse(try container.decode(ReconnectResponse.self, forKey: .payload))
@@ -419,8 +482,12 @@ public enum PairingControlMessage: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(version, forKey: .version)
         switch self {
-        case .qrRequest(let value):
-            try container.encode(Kind.qrRequest, forKey: .type); try container.encode(value, forKey: .payload)
+        case .nearbyOfferRequest(let value):
+            try container.encode(Kind.nearbyOfferRequest, forKey: .type); try container.encode(value, forKey: .payload)
+        case .nearbyOfferResponse(let value):
+            try container.encode(Kind.nearbyOfferResponse, forKey: .type); try container.encode(value, forKey: .payload)
+        case .pairingRequest(let value):
+            try container.encode(Kind.pairingRequest, forKey: .type); try container.encode(value, forKey: .payload)
         case .macResponse(let value):
             try container.encode(Kind.macResponse, forKey: .type); try container.encode(value, forKey: .payload)
         case .reconnectChallenge(let value):

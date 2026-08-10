@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 import GazeCore
+import GazeCropKit
+import OSLog
+
+private let macApplicationLog = Logger(subsystem: "com.aviary.EagleGazeMac", category: "application")
 
 /// A source row that can be rendered without making an unavailable vendor
 /// integration look selectable.  Keeping the Tobii row here makes the source
@@ -43,6 +47,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
     let pairing: PairingService
     let pairingServer: PairingControlServer?
     let displayProvider: DisplayProvider
+    private let gazeCaptureService: any GazeCaptureServicing
 
     @Published private(set) var latestFrame: CanonicalGazeFrame?
     @Published private(set) var isFresh = false
@@ -52,27 +57,45 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
     @Published private(set) var sourceOptions: [GazeSourceOption]
     @Published private(set) var pairingState: PairingServiceState = .idle
     @Published private(set) var pairingControlAvailable = false
+    @Published private(set) var hasAuthenticatedPhoneSession = false
     @Published var selectedSourceID: GazeSourceID?
     @Published var selectedDisplayID: String
     @Published var showsGazeOverlay = true
+    @Published var smartCropEnabled: Bool {
+        didSet { UserDefaults.standard.set(smartCropEnabled, forKey: Self.smartCropPreferenceKey) }
+    }
+    @Published var cerebrasEnrichmentEnabled: Bool {
+        didSet { UserDefaults.standard.set(cerebrasEnrichmentEnabled, forKey: Self.cerebrasPreferenceKey) }
+    }
+    @Published private(set) var hasCerebrasAPIKey = false
+    @Published private(set) var accessibilityTrusted = AccessibilityRegionResolver.isProcessTrusted
+    @Published private(set) var geometryAssessment: CalibrationGeometryAssessment?
 
     private var cancellables = Set<AnyCancellable>()
     private let setupID = "default-mount"
-    // William Goishi's adaptive stabilizer keeps stationary gaze still while
-    // snapping true saccades instead of animating a nauseating cross-screen
-    // glide. It consumes only mapped canonical points at this presentation
-    // boundary; no raw ARKit data crosses into the app layer.
+    // Presentation-only filtering. Calibration always consumes the raw
+    // canonical point; the 1-Euro/dead-zone/saccade filter is applied only to
+    // the dot users see after mapping.
     private var stabilizer = GazeStabilizer()
+    private var geometryMonitor = CalibrationGeometryMonitor()
+    private var lastLoggedGeometryStatus: CalibrationGeometryStatus = .stable
+    private var attentionEstimator = try! AttentionEstimator()
+    private let cerebrasCredentialStore = CerebrasCredentialStore()
     private let pairingCallbacks: PairingCompositionCallbacks
     private var activeSessionID: UUID?
     private var activeSessionSourceID: GazeSourceID?
+    private var lastCalibrationRejectionAt: TimeInterval = 0
+    private var lastCalibrationRejectionDescription: String?
+    private static let smartCropPreferenceKey = "capture.smartCropEnabled"
+    private static let cerebrasPreferenceKey = "capture.cerebrasEnrichmentEnabled"
 
     init(
         receiver: GazeReceiver = GazeReceiver(),
         calibration: CalibrationCoordinator = CalibrationCoordinator(),
         pairing: PairingService? = nil,
         pairingServer: PairingControlServer? = nil,
-        displayProvider: DisplayProvider = DisplayProvider()
+        displayProvider: DisplayProvider = DisplayProvider(),
+        gazeCaptureService: (any GazeCaptureServicing)? = nil
     ) {
         let callbacks = PairingCompositionCallbacks()
         let service: PairingService
@@ -99,7 +122,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
             } catch {
                 // A missing/unavailable Keychain identity must not silently
                 // fall back to a portable fingerprint. Pairing remains
-                // disabled and no listener/QR is exposed for this run.
+                // disabled and no pairing listener is exposed for this run.
                 identityError = error
                 // This service is deliberately inert: the control server is
                 // nil and the UI refuses to create an offer. A process-local
@@ -120,11 +143,16 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         self.pairing = service
         self.pairingServer = server
         self.displayProvider = displayProvider
+        self.gazeCaptureService = gazeCaptureService ?? GazeCaptureService()
         self.pairingCallbacks = callbacks
         self.snapshot = calibration.snapshot
         self.selectedSourceID = sourceManager.activeSourceID
         self.selectedDisplayID = displayProvider.selectedDisplayID
         self.sourceOptions = Self.makeSourceOptions(from: sourceManager.sources)
+        self.smartCropEnabled = UserDefaults.standard.object(forKey: Self.smartCropPreferenceKey) as? Bool ?? true
+        self.cerebrasEnrichmentEnabled = UserDefaults.standard.bool(forKey: Self.cerebrasPreferenceKey)
+        self.hasCerebrasAPIKey = ((try? cerebrasCredentialStore.load()) ?? nil)?.isEmpty == false
+        if !hasCerebrasAPIKey { self.cerebrasEnrichmentEnabled = false }
 
         receiver.$latestFrame
             .receive(on: DispatchQueue.main)
@@ -149,12 +177,15 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
             self?.pairingState = state
         }
         if let identityError {
+            macApplicationLog.fault("Secure pairing disabled identity error=\(identityError.localizedDescription, privacy: .public)")
             lastError = "Mac receiver identity unavailable; secure pairing is disabled: \(identityError.localizedDescription)"
         } else if let server {
             do {
                 try server.start()
                 pairingControlAvailable = true
+                macApplicationLog.notice("Pairing control service started")
             } catch {
+                macApplicationLog.error("Pairing control service failed error=\(error.localizedDescription, privacy: .public)")
                 lastError = "Pairing control server unavailable: \(error.localizedDescription)"
             }
         }
@@ -173,10 +204,26 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         return isFresh ? "\(activeSource.displayName) is live" : "\(activeSource.displayName) is waiting for a fresh frame"
     }
 
+    var geometryStatusText: String? {
+        guard let assessment = geometryAssessment else { return nil }
+        switch assessment.status {
+        case .stable: return nil
+        case .recenterRecommended:
+            return "Your viewing position shifted. Recenter for a quick correction."
+        case .recalibrationRequired:
+            return "The phone-to-face geometry changed materially. Run a full recalibration."
+        }
+    }
+
     func selectSource(_ id: GazeSourceID) {
         guard let option = sourceOptions.first(where: { $0.id == id }) else { return }
         guard option.isAvailable else {
             lastError = "Tobii is not available in this MVP. Select ARKit when an iPhone is paired."
+            return
+        }
+        guard option.kind != .arkitRemote || hasAuthenticatedPhoneSession else {
+            macApplicationLog.warning("Blocked pre-authentication ARKit source selection")
+            lastError = "Authenticate an iPhone before selecting its gaze source."
             return
         }
         do {
@@ -201,33 +248,6 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         refreshSnapshot()
     }
 
-    func beginPairingOffer() {
-        guard let pairingServer else {
-            lastError = "Secure pairing is unavailable because this Mac has no stable receiver identity."
-            return
-        }
-        do {
-            // Retry a launch-time listener failure, but never show a QR unless
-            // the authenticated control channel is available to receive it.
-            try pairingServer.start()
-            pairingControlAvailable = true
-        } catch {
-            pairingControlAvailable = false
-            lastError = "Pairing control server unavailable: \(error.localizedDescription)"
-            return
-        }
-        do {
-            _ = try pairing.makeOffer()
-            pairingState = pairing.state
-            lastError = nil
-        } catch { lastError = error.localizedDescription }
-    }
-
-    func cancelPairingOffer() {
-        pairing.cancelOffer()
-        pairingState = pairing.state
-    }
-
     /// Called by the authenticated pairing transport when the phone completes
     /// its side of the transcript. The resulting pending state is published;
     /// durable storage still waits for the UI's explicit confirmation.
@@ -239,9 +259,9 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
     }
 
     /// Wire-level overload used by the Mac pairing control server. Validation
-    /// of the QR offer remains inside PairingService.
+    /// of the short-lived offer remains inside PairingService.
     @discardableResult
-    func receivePairingRequest(_ request: PairingQRRequest) throws -> PendingPairingConfirmation {
+    func receivePairingRequest(_ request: PairingInitiationRequest) throws -> PendingPairingConfirmation {
         let confirmation = try pairing.beginPairing(request)
         pairingState = pairing.state
         return confirmation
@@ -257,6 +277,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
             guard let self else { return }
             do {
                 _ = try await pairingServer.approve(confirmationID: pending.confirmationID)
+                macApplicationLog.notice("Pairing confirmation completed")
                 pairingState = pairing.state
                 lastError = nil
             } catch { lastError = error.localizedDescription }
@@ -275,6 +296,21 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
                 try await pairingServer.reject(confirmationID: pending.confirmationID)
                 pairingState = pairing.state
             } catch { lastError = error.localizedDescription }
+        }
+    }
+
+    func restartPairingControl() {
+        guard let pairingServer, !hasAuthenticatedPhoneSession else { return }
+        macApplicationLog.notice("User requested pairing control restart")
+        pairingServer.stop()
+        pairingControlAvailable = false
+        do {
+            try pairingServer.start()
+            pairingControlAvailable = true
+            lastError = nil
+        } catch {
+            lastError = "Could not restart nearby pairing: \(error.localizedDescription)"
+            macApplicationLog.error("Pairing control restart failed error=\(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -299,6 +335,10 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         displayName: String,
         receiverFingerprint: String? = nil
     ) {
+        // Freshness belongs to one authenticated session and must never carry
+        // across a reconnect before the new session produces a frame.
+        isFresh = false
+        clearPresentationState()
         do {
             try receiver.activatePairedSource(
                 sourceID: sourceID,
@@ -315,11 +355,13 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
             selectedSourceID = sourceID
             activeSessionID = material.sessionID
             activeSessionSourceID = sourceID
-            clearPresentationState()
+            hasAuthenticatedPhoneSession = true
             configureContext()
             refreshSnapshot()
             lastError = nil
+            macApplicationLog.notice("Secure gaze source installed device=\(displayName, privacy: .public) session=\(material.sessionID.uuidString.prefix(8), privacy: .public)")
         } catch {
+            macApplicationLog.error("Secure gaze source installation failed error=\(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
         }
     }
@@ -345,13 +387,17 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         }
         activeSessionID = nil
         self.activeSessionSourceID = nil
+        hasAuthenticatedPhoneSession = false
+        isFresh = false
+        clearPresentationState()
+        macApplicationLog.notice("Authenticated phone session ended session=\(sessionID.uuidString.prefix(8), privacy: .public)")
     }
 
 
-    // MARK: GazeApplicationService (VoiceOS-safe, coarse only)
+    // MARK: GazeApplicationService (coarse state plus approved one-shot capture)
 
     var voiceOSSnapshot: GazeApplicationSnapshot {
-        let connection: GazeApplicationConnectionState = if activeSource == nil {
+        let connection: GazeApplicationConnectionState = if !hasAuthenticatedPhoneSession {
             .offline
         } else if isFresh {
             .connected
@@ -360,7 +406,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         }
         let state: GazeApplicationCalibrationState = switch snapshot.phase {
         case .idle: .setup
-        case .calibrating: .calibrating
+        case .calibrating, .validating, .recentering: .calibrating
         case .calibrated, .evaluating, .complete: .calibrated
         case .failed: .failed
         }
@@ -385,24 +431,128 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
     }
 
     func startCalibration() throws {
-        guard activeSource != nil, isFresh else { throw GazeApplicationServiceError.notConnected }
-        try calibration.startCalibration()
-        clearPresentationState()
-        refreshSnapshot()
+        try beginFreshCalibration(reason: "initial")
     }
 
     func resetCalibration() throws {
         guard activeSource != nil else { throw GazeApplicationServiceError.notConnected }
         try calibration.reset()
+        macApplicationLog.notice("Calibration reset display=\(self.selectedDisplayID, privacy: .public)")
         clearPresentationState()
         refreshSnapshot()
+    }
+
+    func recalibrateEagleEye() throws {
+        try beginFreshCalibration(reason: "recalibrate")
+    }
+
+    /// Starts a new candidate calibration immediately. The last accepted
+    /// profile remains usable and persisted until the replacement passes its
+    /// independent validation targets.
+    private func beginFreshCalibration(reason: String) throws {
+        guard activeSource != nil, isFresh else {
+            let sourceState = activeSource == nil ? "missing" : "ready"
+            macApplicationLog.error(
+                "Calibration request gated reason=\(reason, privacy: .public) source=\(sourceState, privacy: .public) fresh=\(self.isFresh, privacy: .public)"
+            )
+            throw GazeApplicationServiceError.notConnected
+        }
+        let priorPhase = snapshot.phase.rawValue
+        let hasRollbackProfile = snapshot.profile != nil
+        macApplicationLog.notice(
+            "Calibration request accepted reason=\(reason, privacy: .public) priorPhase=\(priorPhase, privacy: .public) rollbackProfile=\(hasRollbackProfile, privacy: .public) display=\(self.selectedDisplayID, privacy: .public)"
+        )
+        try calibration.startCalibration()
+        clearPresentationState()
+        refreshSnapshot()
+        lastError = nil
+        macApplicationLog.notice(
+            "Calibration collection active reason=\(reason, privacy: .public) target=\(self.snapshot.targetIndex + 1, privacy: .public)/\(self.snapshot.targetCount, privacy: .public)"
+        )
+    }
+
+    func captureGaze(
+        marker: GazeCaptureMarker,
+        cancellation: any GazeCaptureCancellationChecking = NeverCancelledGazeCapture()
+    ) async throws -> GazeCaptureArtifact {
+        guard snapshot.profile != nil else { throw GazeCaptureError.notCalibrated }
+        guard isFresh, let mappedPoint else { throw GazeCaptureError.gazeStale }
+        guard let selectedDisplay else { throw GazeCaptureError.displayUnavailable }
+        let calibrationError = snapshot.profile?.quality.rmsError ?? 0
+        let estimate = try? attentionEstimator.snapshot(
+            at: ProcessInfo.processInfo.systemUptime,
+            calibrationError: NormalizedPoint(x: calibrationError, y: calibrationError)
+        )
+        let attention = estimate?.isEligible() == true ? estimate : nil
+        let apiKey = cerebrasEnrichmentEnabled ? try? cerebrasCredentialStore.load() : nil
+        return try await gazeCaptureService.capture(
+            display: selectedDisplay,
+            normalizedGaze: mappedPoint,
+            attention: attention,
+            marker: marker,
+            options: GazeCaptureOptions(
+                smartCropEnabled: smartCropEnabled,
+                cerebrasAPIKey: apiKey ?? nil
+            ),
+            cancellation: cancellation
+        )
+    }
+
+    func requestAccessibilityPermission() {
+        accessibilityTrusted = AccessibilityRegionResolver.requestTrustPrompt()
+        if !accessibilityTrusted {
+            lastError = "Accessibility permission is needed to identify complete app controls and text regions. Smart crop will use its local fixed-region fallback until permission is enabled."
+        }
+    }
+
+    func refreshAccessibilityPermission() {
+        accessibilityTrusted = AccessibilityRegionResolver.isProcessTrusted
+    }
+
+    func saveCerebrasAPIKey(_ key: String) {
+        do {
+            try cerebrasCredentialStore.save(key)
+            hasCerebrasAPIKey = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func removeCerebrasAPIKey() {
+        do {
+            try cerebrasCredentialStore.delete()
+            hasCerebrasAPIKey = false
+            cerebrasEnrichmentEnabled = false
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func requestScreenCapturePermission() {
+        if !gazeCaptureService.requestScreenCapturePermission() {
+            lastError = "Screen Recording permission is required to share a gaze capture. Enable EagleGaze in System Settings → Privacy & Security → Screen Recording."
+        } else {
+            lastError = nil
+        }
     }
 
     func startEvaluation() throws {
         guard snapshot.profile != nil else { throw GazeApplicationServiceError.notCalibrated }
         try calibration.startEvaluation()
+        macApplicationLog.notice("Calibration evaluation started")
         clearPresentationState()
         refreshSnapshot()
+    }
+
+    func recenterGaze() throws {
+        guard activeSource != nil, isFresh else { throw GazeApplicationServiceError.notConnected }
+        guard snapshot.profile != nil else { throw GazeApplicationServiceError.notCalibrated }
+        try calibration.startRecenter()
+        clearPresentationState()
+        refreshSnapshot()
+        lastError = nil
     }
 
     private func consume(_ frame: CanonicalGazeFrame?) {
@@ -412,19 +562,57 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         // A source emits a frame before its freshness notification. Treat the
         // accepted canonical frame as fresh here; a subsequent stale event
         // clears presentation state synchronously.
-        guard frame.validity == .valid, frame.blink != .closed else {
-            clearPresentationState()
-            return
-        }
         do {
+            let priorPhase = snapshot.phase
+            let priorTarget = snapshot.targetIndex
+            let priorSamples = snapshot.sampleCount
             _ = try calibration.consume(frame)
             refreshSnapshot()
+            if (priorPhase == .validating || priorPhase == .calibrating), snapshot.phase == .calibrated, let profile = snapshot.profile {
+                macApplicationLog.notice(
+                    "Calibration completed samples=\(profile.quality.sampleCount, privacy: .public) fitRMS=\(profile.quality.rmsError, privacy: .public) validationRMS=\(profile.quality.validationRMSError ?? -1, privacy: .public)"
+                )
+            } else if snapshot.phase == .calibrating || snapshot.phase == .validating || snapshot.phase == .recentering {
+                if snapshot.targetIndex != priorTarget {
+                    macApplicationLog.notice("Calibration advanced phase=\(self.snapshot.phase.rawValue, privacy: .public) target=\(self.snapshot.targetIndex + 1, privacy: .public)/\(self.snapshot.targetCount, privacy: .public)")
+                } else if priorSamples == 0, snapshot.sampleCount > 0 {
+                    macApplicationLog.info("Calibration accepted first sample target=\(self.snapshot.targetIndex + 1, privacy: .public)")
+                }
+            } else if priorPhase == .evaluating, snapshot.phase == .complete {
+                macApplicationLog.notice(
+                    "Calibration evaluation completed hits=\(self.snapshot.evaluationHits, privacy: .public)/\(self.snapshot.trialCount, privacy: .public)"
+                )
+            }
+            updateGeometryAssessment(from: frame)
+            guard frame.validity == .valid, frame.blink != .closed else {
+                mappedPoint = nil
+                stabilizer.reset()
+                return
+            }
             updateMappedPoint()
+            if let calibratedPoint = snapshot.mappedPoint {
+                try? attentionEstimator.append(
+                    TimedGazePoint(
+                        point: NormalizedPoint(x: calibratedPoint.x, y: calibratedPoint.y),
+                        confidence: min(max(frame.confidence, 0), 1),
+                        captureUptime: ProcessInfo.processInfo.systemUptime
+                    )
+                )
+            }
         } catch {
             // Invalid frames are presentation boundaries, not application
             // failures.  The coordinator has already rejected the frame.
             if case CalibrationCoordinatorError.engine = error {
                 lastError = nil
+            }
+            if snapshot.phase == .calibrating || snapshot.phase == .validating || snapshot.phase == .recentering {
+                let now = ProcessInfo.processInfo.systemUptime
+                let description = error.localizedDescription
+                if description != lastCalibrationRejectionDescription || now - lastCalibrationRejectionAt >= 1 {
+                    macApplicationLog.warning("Calibration rejected frame reason=\(description, privacy: .public)")
+                    lastCalibrationRejectionAt = now
+                    lastCalibrationRejectionDescription = description
+                }
             }
             clearPresentationState()
         }
@@ -449,6 +637,9 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
                 coordinateSpace: activeSource?.capabilities.contains(.displayNormalizedCoordinates) == true
                     ? .displayNormalized : .source
             )
+            geometryMonitor.reset()
+            geometryAssessment = nil
+            lastLoggedGeometryStatus = .stable
             lastError = nil
         } catch { lastError = error.localizedDescription }
     }
@@ -457,6 +648,7 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         mappedPoint = nil
         latestFrame = nil
         stabilizer.reset()
+        attentionEstimator.reset()
     }
 
     private func updateMappedPoint() {
@@ -466,6 +658,19 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         }
         let timestamp = latestFrame?.captureUptime ?? ProcessInfo.processInfo.systemUptime
         mappedPoint = stabilizer.update(point, at: timestamp)
+    }
+
+    private func updateGeometryAssessment(from frame: CanonicalGazeFrame) {
+        guard snapshot.phase == .calibrated || snapshot.phase == .complete || snapshot.phase == .evaluating,
+              let baseline = snapshot.profile?.geometryBaseline,
+              let current = frame.trackingMetrics?.geometry,
+              let assessment = geometryMonitor.update(current: current, baseline: baseline) else { return }
+        geometryAssessment = assessment
+        guard assessment.status != lastLoggedGeometryStatus else { return }
+        lastLoggedGeometryStatus = assessment.status
+        macApplicationLog.notice(
+            "Geometry status changed status=\(assessment.status.rawValue, privacy: .public) positionDeltaM=\(assessment.positionDeltaMeters, format: .fixed(precision: 3), privacy: .public) angleDeltaDeg=\(assessment.angleDeltaDegrees, format: .fixed(precision: 1), privacy: .public)"
+        )
     }
 
     private func refreshSnapshot() { snapshot = calibration.snapshot; updateMappedPoint() }

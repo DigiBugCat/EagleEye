@@ -104,28 +104,49 @@ public struct CalibrationQualitySummary: Codable, Equatable, Sendable {
     public var meanError: Double
     public var rmsError: Double
     public var maxError: Double
+    public var validationRMSError: Double?
+    public var validationMaxError: Double?
+    public var meanTargetDispersion: Double?
+    public var rejectedSampleCount: Int?
+    public var modelName: String?
 
     public init(
         sampleCount: Int = 0,
         targetCount: Int = 0,
         meanError: Double = 0,
         rmsError: Double = 0,
-        maxError: Double = 0
+        maxError: Double = 0,
+        validationRMSError: Double? = nil,
+        validationMaxError: Double? = nil,
+        meanTargetDispersion: Double? = nil,
+        rejectedSampleCount: Int? = nil,
+        modelName: String? = nil
     ) {
         self.sampleCount = sampleCount
         self.targetCount = targetCount
         self.meanError = meanError
         self.rmsError = rmsError
         self.maxError = maxError
+        self.validationRMSError = validationRMSError
+        self.validationMaxError = validationMaxError
+        self.meanTargetDispersion = meanTargetDispersion
+        self.rejectedSampleCount = rejectedSampleCount
+        self.modelName = modelName
     }
 
     public static let empty = CalibrationQualitySummary()
 
     public var isFinite: Bool {
         meanError.isFinite && rmsError.isFinite && maxError.isFinite
+            && (validationRMSError?.isFinite ?? true)
+            && (validationMaxError?.isFinite ?? true)
+            && (meanTargetDispersion?.isFinite ?? true)
     }
 
-    public var isValid: Bool { isFinite && sampleCount >= 0 && targetCount >= 0 }
+    public var isValid: Bool {
+        isFinite && sampleCount >= 0 && targetCount >= 0
+            && (rejectedSampleCount.map { $0 >= 0 } ?? true)
+    }
 
     public func meetsMinimumSamples(_ minimum: Int) -> Bool {
         sampleCount >= minimum && minimum > 0 && isFinite
@@ -162,30 +183,39 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
     public var version: Int
     public var key: CalibrationProfileKey
     public var baseTransform: AffineTransform2D?
+    /// Preferred mapping for new profiles. `baseTransform` remains populated
+    /// for affine candidates so version-1 readers and stored profiles continue
+    /// to work during migration.
+    public var mapping: GazeMapping?
     public var fineAdjustment: FineAdjustment
     public var coordinateSpace: CalibrationCoordinateSpace
     public var quality: CalibrationQualitySummary
     public var createdAt: Date
     public var updatedAt: Date
+    public var geometryBaseline: GazeGeometrySample?
 
     public init(
         version: Int = Self.currentVersion,
         key: CalibrationProfileKey,
         baseTransform: AffineTransform2D? = nil,
+        mapping: GazeMapping? = nil,
         fineAdjustment: FineAdjustment = .identity,
         coordinateSpace: CalibrationCoordinateSpace = .source,
         quality: CalibrationQualitySummary = .empty,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        geometryBaseline: GazeGeometrySample? = nil
     ) {
         self.version = version
         self.key = key
         self.baseTransform = baseTransform
+        self.mapping = mapping
         self.fineAdjustment = fineAdjustment
         self.coordinateSpace = coordinateSpace
         self.quality = quality
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.geometryBaseline = geometryBaseline
     }
 
     public static func identity(
@@ -204,7 +234,7 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
 
     /// Applies the base mapping, followed by the center-relative adjustment.
     public func apply(to point: Point2D, center: Point2D = Point2D(x: 0.5, y: 0.5)) -> Point2D {
-        let mapped = baseTransform?.apply(to: point) ?? point
+        let mapped = mapping?.apply(to: point) ?? baseTransform?.apply(to: point) ?? point
         return fineAdjustment.apply(to: mapped, around: center)
     }
 
@@ -238,6 +268,17 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         if let baseTransform,
            ![baseTransform.a, baseTransform.b, baseTransform.c,
              baseTransform.d, baseTransform.tx, baseTransform.ty].allSatisfy(\.isFinite) {
+            throw CalibrationProfileValidationError.nonFiniteMapping
+        }
+        if let mapping {
+            let probes = [
+                Point2D(x: 0, y: 0), Point2D(x: 0.5, y: 0.5), Point2D(x: 1, y: 1),
+            ]
+            guard probes.allSatisfy({ mapping.apply(to: $0) != nil }) else {
+                throw CalibrationProfileValidationError.nonFiniteMapping
+            }
+        }
+        if let geometryBaseline, !geometryBaseline.isFinite {
             throw CalibrationProfileValidationError.nonFiniteMapping
         }
         guard fineAdjustment.isValid else {

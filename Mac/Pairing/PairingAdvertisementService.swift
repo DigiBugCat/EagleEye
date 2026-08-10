@@ -2,13 +2,13 @@ import Foundation
 import GazeCore
 import Network
 
-/// Platform seam for advertising the short-lived pairing service.  The QR is
-/// the authenticated offer; Bonjour only makes the receiver discoverable.
+/// Platform seam for advertising the nearby pairing service. Bonjour makes
+/// the Mac discoverable; a selected connection requests a short-lived offer.
 public protocol PairingAdvertisementService: AnyObject, Sendable {
     var isAdvertising: Bool { get }
     func start(offer: PairingOffer) throws
     func stop()
-    /// Ends the visible QR offer while allowing a long-lived control listener
+    /// Ends the active one-time offer while allowing a long-lived listener
     /// to remain discoverable for reconnects.  Simple advertisements may use
     /// the default implementation, which stops the listener entirely.
     func stopOffer()
@@ -61,11 +61,9 @@ public final class BonjourPairingAdvertisementService: PairingAdvertisementServi
             throw PairingAdvertisementError.listenerUnavailable
         }
 
-        // Do not put the one-time secret or pairing key in TXT metadata.  The
-        // offer is carried by the QR and remains opaque to Bonjour observers.
-        // Bonjour carries the exact stable service identity used by the phone
-        // browser.  The receiver fingerprint remains in the QR/transcript;
-        // offer secrets and ephemeral keys are never TXT metadata.
+        // Do not put the one-time secret or pairing key in TXT metadata.
+        // Offer material is returned only after a phone connects to the
+        // selected Bonjour endpoint; TXT remains a routing label.
         let advertisedName = String(offer.serviceIdentity.prefix(63))
         newListener.service = NWListener.Service(
             name: advertisedName,

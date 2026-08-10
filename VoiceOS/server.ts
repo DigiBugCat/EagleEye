@@ -1,15 +1,33 @@
 /** EagleGaze — a VoiceOS integration server (standard MCP over stdio). */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createHash } from "node:crypto";
 import { createConnection } from "node:net";
 import { z } from "zod";
 
-const BRIDGE_PROTOCOL_VERSION = 1;
+const STATUS_PROTOCOL_VERSION = 1;
+const TOOL_PROTOCOL_VERSION = 2;
 const DEFAULT_BRIDGE_PORT = 47_474;
+const MAX_RESPONSE_HEADER_BYTES = 65_536;
+const MAX_IMAGE_BODY_BYTES = 4 * 1024 * 1024;
+// One request can include a 30-second Eagle-owned approval window followed by
+// a 30-second optional provider call, plus bounded capture/encoding overhead.
+const TOOL_TIMEOUT_MS = 70_000;
 const COMPANION_BUNDLE_ID = "com.aviary.EagleGazeMac";
 const COMPANION_DOWNLOAD_URL = "https://github.com/DigiBugCat/EagleGaze/releases/latest";
 
+function bridgePort(): number {
+  const raw = process.env.EAGLEGAZE_BRIDGE_PORT;
+  if (raw === undefined) return DEFAULT_BRIDGE_PORT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error("EAGLEGAZE_BRIDGE_PORT must be an integer from 1 to 65535.");
+  }
+  return parsed;
+}
+
 type BridgeCommand = "status" | "start_calibration" | "reset_calibration" | "start_evaluation";
+type BridgeToolName = "recalibrate_eagleeye" | "start_gaze_evaluation" | "capture_gaze";
 
 const SourceKindSchema = z.enum(["phone", "vendor", "unknown"]);
 const ConnectionStateSchema = z.enum(["connected", "stale", "offline", "unavailable"]);
@@ -74,6 +92,85 @@ const BridgeResponseSchema = z.object({
   }
 });
 
+const BridgeV2ErrorSchema = z.object({
+  code: z.string().trim().min(1).max(80),
+  message: z.string().trim().min(1).max(500),
+  retryable: z.boolean(),
+}).strict();
+
+const GazeCoordinatesSchema = z.object({
+  x: z.number().finite().nonnegative(),
+  y: z.number().finite().nonnegative(),
+  normalizedX: z.number().finite().min(0).max(1),
+  normalizedY: z.number().finite().min(0).max(1),
+  uncertaintyRadius: z.number().finite().nonnegative(),
+}).strict();
+
+const CaptureRegionSchema = z.object({
+  kind: z.enum(["text", "control", "controlGroup", "image", "chart", "tableCell", "tableRow", "table", "dialog", "panel", "window", "unknown"]),
+  resolvedBy: z.enum(["explicitApplicationRegion", "accessibility", "segmentation", "fixedContextFallback", "userAdjusted"]),
+  confidence: z.number().finite().min(0).max(1),
+  fallbackUsed: z.boolean(),
+  topmostAtGaze: z.boolean().optional(),
+  includedRelationships: z.array(z.enum(["title", "header", "label", "linkedElement"])).max(4),
+}).strict();
+
+const CaptureEnrichmentSchema = z.object({
+  provenance: z.literal("external_provider"),
+  trust: z.literal("untrusted_advisory"),
+  provider: z.literal("cerebras"),
+  model: z.literal("gemma-4-31b"),
+  contentType: z.string().max(500),
+  regionSummary: z.string().max(4_000),
+  focusedSubject: z.string().max(2_000),
+  focusedText: z.string().max(4_000),
+  contextSufficient: z.boolean(),
+  labels: z.array(z.string().max(200)).max(50),
+  confidence: z.number().finite().min(0).max(1),
+  warnings: z.array(z.string().max(500)).max(20),
+}).strict();
+
+const CaptureResultSchema = z.object({
+  kind: z.literal("image"),
+  mimeType: z.literal("image/jpeg"),
+  width: z.number().int().positive().max(2_048),
+  height: z.number().int().positive().max(2_048),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  target: z.literal("calibrated_display"),
+  scope: z.literal("context_region"),
+  marker: z.enum(["circle", "square"]),
+  capturedAt: z.string().datetime({ offset: true }),
+  gaze: GazeCoordinatesSchema,
+  region: CaptureRegionSchema.optional(),
+  enrichment: CaptureEnrichmentSchema.optional(),
+  enrichmentWarning: z.string().max(500).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.gaze.x >= value.width || value.gaze.y >= value.height) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Gaze point falls outside the returned image." });
+  }
+});
+
+const ActionResultSchema = z.object({ snapshot: BridgeSnapshotSchema }).strict();
+
+const BridgeV2HeaderSchema = z.object({
+  version: z.number().int(),
+  requestID: z.string().uuid().nullable(),
+  ok: z.boolean(),
+  bodyLength: z.number().int().nonnegative().max(MAX_IMAGE_BODY_BYTES),
+  result: z.unknown().optional(),
+  error: BridgeV2ErrorSchema.optional(),
+}).strict().superRefine((value, context) => {
+  if (value.ok && value.result === undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Successful v2 responses require a result." });
+  }
+  if (!value.ok && !value.error) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Failed v2 responses require an error." });
+  }
+  if (!value.ok && value.bodyLength !== 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Failed v2 responses cannot include a body." });
+  }
+});
+
 type BridgeSnapshot = z.output<typeof BridgeSnapshotSchema>;
 
 type BridgeResponse = {
@@ -91,14 +188,89 @@ class CompanionUnavailableError extends Error {
   }
 }
 
+class BridgeToolError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(code: string, message: string, retryable: boolean) {
+    super(message);
+    this.name = "BridgeToolError";
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+class BridgeProtocolError extends Error {
+  readonly code: "invalid_bridge_response" | "capture_integrity_failed";
+
+  constructor(message: string, code: "invalid_bridge_response" | "capture_integrity_failed" = "invalid_bridge_response") {
+    super(message);
+    this.name = "BridgeProtocolError";
+    this.code = code;
+  }
+}
+
+const SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+const MOCK_JPEG_BASE64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAADAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3+iiigD//2Q==";
+
+/** Reads only the bounded JPEG marker header; entropy-coded image data is never decoded here. */
+function jpegDimensions(image: Buffer): { width: number; height: number } {
+  const invalid = (reason: string): never => {
+    throw new BridgeProtocolError(`EagleGaze returned a malformed JPEG: ${reason}`, "capture_integrity_failed");
+  };
+  if (image.length < 12 || image[0] !== 0xff || image[1] !== 0xd8 || image.at(-2) !== 0xff || image.at(-1) !== 0xd9) {
+    return invalid("missing the required SOI/EOI structure.");
+  }
+
+  let offset = 2;
+  while (offset < image.length - 2) {
+    if (image[offset] !== 0xff) return invalid("invalid marker prefix.");
+    while (offset < image.length && image[offset] === 0xff) offset += 1;
+    if (offset >= image.length) return invalid("truncated marker.");
+    const marker = image[offset]!;
+    offset += 1;
+
+    if (marker === 0xd9) return invalid("ended before a start-of-frame marker.");
+    if (marker === 0xda) return invalid("started scan data before declaring dimensions.");
+    if (marker === 0x00) return invalid("unexpected stuffed byte in the marker header.");
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > image.length - 2) return invalid("truncated segment length.");
+
+    const segmentLength = image.readUInt16BE(offset);
+    if (segmentLength < 2) return invalid("invalid segment length.");
+    const segmentEnd = offset + segmentLength;
+    if (segmentEnd > image.length - 2) return invalid("segment extends beyond the image body.");
+
+    if (SOF_MARKERS.has(marker)) {
+      if (segmentLength < 11) return invalid("start-of-frame segment is too short.");
+      const height = image.readUInt16BE(offset + 3);
+      const width = image.readUInt16BE(offset + 5);
+      const components = image[offset + 7]!;
+      if (components < 1 || segmentLength !== 8 + 3 * components) {
+        return invalid("start-of-frame component table is inconsistent.");
+      }
+      if (width < 1 || height < 1 || width > 2_048 || height > 2_048) {
+        throw new BridgeProtocolError(
+          "EagleGaze returned JPEG dimensions outside the supported 1...2048 pixel range.",
+          "capture_integrity_failed",
+        );
+      }
+      return { width, height };
+    }
+    offset = segmentEnd;
+  }
+  return invalid("no start-of-frame marker was found.");
+}
+
 async function requestFromCompanion(command: BridgeCommand): Promise<BridgeSnapshot> {
   if (process.env.EAGLEGAZE_BRIDGE_MOCK === "1") return mockSnapshot(command);
 
   const requestID = crypto.randomUUID();
-  const request = JSON.stringify({ version: BRIDGE_PROTOCOL_VERSION, requestID, command });
+  const request = JSON.stringify({ version: STATUS_PROTOCOL_VERSION, requestID, command });
 
   return await new Promise<BridgeSnapshot>((resolve, reject) => {
-    const socket = createConnection({ host: "127.0.0.1", port: DEFAULT_BRIDGE_PORT });
+    const port = bridgePort();
+    const socket = createConnection({ host: "127.0.0.1", port });
     let responseBuffer = "";
     let settled = false;
 
@@ -136,7 +308,7 @@ async function requestFromCompanion(command: BridgeCommand): Promise<BridgeSnaps
           return;
         }
         const parsed = parsedResult.data;
-        if (parsed.version !== BRIDGE_PROTOCOL_VERSION || parsed.requestID !== requestID) {
+        if (parsed.version !== STATUS_PROTOCOL_VERSION || parsed.requestID !== requestID) {
           finish(new CompanionUnavailableError("The installed EagleGaze app uses an incompatible bridge protocol."));
         } else if (!parsed.ok) {
           finish(new Error(parsed.error?.message ?? "EagleGaze rejected the bridge request."));
@@ -151,11 +323,205 @@ async function requestFromCompanion(command: BridgeCommand): Promise<BridgeSnaps
     });
     socket.once("error", (error) => {
       finish(new CompanionUnavailableError(
-        `Could not reach EagleGaze on 127.0.0.1:${DEFAULT_BRIDGE_PORT}. (${error.message})`,
+        `Could not reach EagleGaze on 127.0.0.1:${port}. (${error.message})`,
       ));
     });
     socket.once("end", () => {
       if (!settled) finish(new CompanionUnavailableError("EagleGaze closed the bridge before responding."));
+    });
+  });
+}
+
+type CaptureResult = z.output<typeof CaptureResultSchema>;
+type CaptureResponse = { metadata: CaptureResult; image: Buffer };
+
+async function callCompanionTool(
+  name: "recalibrate_eagleeye" | "start_gaze_evaluation",
+  args: Record<string, never>,
+): Promise<BridgeSnapshot>;
+async function callCompanionTool(
+  name: "capture_gaze",
+  args: { marker: "circle" | "square" },
+): Promise<CaptureResponse>;
+async function callCompanionTool(
+  name: BridgeToolName,
+  args: Record<string, never> | { marker: "circle" | "square" },
+): Promise<BridgeSnapshot | CaptureResponse> {
+  if (process.env.EAGLEGAZE_BRIDGE_MOCK === "1") {
+    if (name === "capture_gaze") {
+      const image = Buffer.from(MOCK_JPEG_BASE64, "base64");
+      return {
+        image,
+        metadata: CaptureResultSchema.parse({
+          kind: "image",
+          mimeType: "image/jpeg",
+          width: 2,
+          height: 3,
+          sha256: createHash("sha256").update(image).digest("hex"),
+          target: "calibrated_display",
+          scope: "context_region",
+          marker: "marker" in args ? args.marker : "circle",
+          capturedAt: new Date().toISOString(),
+          gaze: { x: 1, y: 1.5, normalizedX: 0.5, normalizedY: 0.5, uncertaintyRadius: 0.25 },
+        }),
+      };
+    }
+    return mockSnapshot(name === "recalibrate_eagleeye" ? "start_calibration" : "start_evaluation");
+  }
+
+  const requestID = crypto.randomUUID();
+  const request = JSON.stringify({
+    version: TOOL_PROTOCOL_VERSION,
+    requestID,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
+
+  return await new Promise<BridgeSnapshot | CaptureResponse>((resolve, reject) => {
+    const port = bridgePort();
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let expectedBytes: number | undefined;
+    let settled = false;
+
+    const finish = (error?: Error, value?: BridgeSnapshot | CaptureResponse) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error);
+      else if (value) resolve(value);
+      else reject(new CompanionUnavailableError("EagleGaze returned no tool result."));
+    };
+
+    const timer = setTimeout(
+      () => finish(new CompanionUnavailableError("EagleGaze did not answer the tool call within 70 seconds.")),
+      TOOL_TIMEOUT_MS,
+    );
+
+    socket.setNoDelay(true);
+    socket.once("connect", () => socket.write(`${request}\n`));
+    socket.on("data", (chunk: Buffer) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > MAX_RESPONSE_HEADER_BYTES + MAX_IMAGE_BODY_BYTES) {
+        finish(new BridgeProtocolError("EagleGaze returned an oversized v2 response."));
+        return;
+      }
+      chunks.push(chunk);
+      if (expectedBytes === undefined) {
+        const combined = Buffer.concat(chunks);
+        const newline = combined.indexOf(0x0a);
+        if (newline < 0) {
+          if (combined.length > MAX_RESPONSE_HEADER_BYTES) {
+            finish(new BridgeProtocolError("EagleGaze returned an oversized v2 response header."));
+          }
+          return;
+        }
+        if (newline > MAX_RESPONSE_HEADER_BYTES) {
+          finish(new BridgeProtocolError("EagleGaze returned an oversized v2 response header."));
+          return;
+        }
+        try {
+          const rawHeader: unknown = JSON.parse(combined.subarray(0, newline).toString("utf8"));
+          const headerResult = BridgeV2HeaderSchema.safeParse(rawHeader);
+          if (!headerResult.success) {
+            finish(new BridgeProtocolError("EagleGaze returned a bridge response outside the v2 schema."));
+            return;
+          }
+          expectedBytes = newline + 1 + headerResult.data.bodyLength;
+          if (receivedBytes > expectedBytes) {
+            finish(new BridgeProtocolError("EagleGaze returned extra bytes after the v2 body."));
+          }
+        } catch {
+          finish(new BridgeProtocolError("EagleGaze returned invalid v2 bridge JSON."));
+        }
+      } else if (receivedBytes > expectedBytes) {
+        finish(new BridgeProtocolError("EagleGaze returned extra bytes after the v2 body."));
+      }
+    });
+    socket.once("error", (error) => {
+      finish(new CompanionUnavailableError(
+        `Could not reach EagleGaze on 127.0.0.1:${port}. (${error.message})`,
+      ));
+    });
+    socket.once("end", () => {
+      if (settled) return;
+      const response = Buffer.concat(chunks);
+      const newline = response.indexOf(0x0a);
+      if (newline < 0 || newline > MAX_RESPONSE_HEADER_BYTES) {
+        finish(new BridgeProtocolError("EagleGaze closed the bridge before returning a complete v2 header."));
+        return;
+      }
+      try {
+        const parsedJSON: unknown = JSON.parse(response.subarray(0, newline).toString("utf8"));
+        const parsedResult = BridgeV2HeaderSchema.safeParse(parsedJSON);
+        if (!parsedResult.success) {
+          finish(new BridgeProtocolError("EagleGaze returned a bridge response outside the v2 schema."));
+          return;
+        }
+        const header = parsedResult.data;
+        if (header.version !== TOOL_PROTOCOL_VERSION || header.requestID !== requestID) {
+          finish(new BridgeProtocolError("EagleGaze returned a mismatched v2 bridge response."));
+          return;
+        }
+        const body = response.subarray(newline + 1);
+        if (body.length !== header.bodyLength) {
+          finish(new BridgeProtocolError("EagleGaze returned a truncated or oversized v2 body."));
+          return;
+        }
+        if (!header.ok) {
+          const bridgeError = header.error!;
+          finish(new BridgeToolError(bridgeError.code, bridgeError.message, bridgeError.retryable));
+          return;
+        }
+        if (name === "capture_gaze") {
+          const metadataResult = CaptureResultSchema.safeParse(header.result);
+          if (!metadataResult.success || header.bodyLength === 0) {
+            finish(new BridgeProtocolError("EagleGaze returned an invalid capture result."));
+            return;
+          }
+          let actualDimensions: { width: number; height: number };
+          try {
+            actualDimensions = jpegDimensions(body);
+          } catch (error: unknown) {
+            finish(error instanceof Error ? error : new BridgeProtocolError("EagleGaze returned an invalid JPEG."));
+            return;
+          }
+          if (
+            actualDimensions.width !== metadataResult.data.width ||
+            actualDimensions.height !== metadataResult.data.height
+          ) {
+            finish(new BridgeProtocolError(
+              "EagleGaze returned JPEG dimensions that do not match its capture metadata.",
+              "capture_integrity_failed",
+            ));
+            return;
+          }
+          const digest = createHash("sha256").update(body).digest("hex");
+          if (digest !== metadataResult.data.sha256) {
+            finish(new BridgeProtocolError(
+              "EagleGaze returned a capture with a mismatched SHA-256 digest.",
+              "capture_integrity_failed",
+            ));
+            return;
+          }
+          finish(undefined, { metadata: metadataResult.data, image: body });
+        } else {
+          if (header.bodyLength !== 0) {
+            finish(new BridgeProtocolError("EagleGaze returned an unexpected body for a control tool."));
+            return;
+          }
+          const actionResult = ActionResultSchema.safeParse(header.result);
+          if (!actionResult.success) {
+            finish(new BridgeProtocolError("EagleGaze returned an invalid control-tool result."));
+            return;
+          }
+          finish(undefined, actionResult.data.snapshot);
+        }
+      } catch {
+        finish(new BridgeProtocolError("EagleGaze returned invalid v2 bridge JSON."));
+      }
     });
   });
 }
@@ -213,7 +579,7 @@ function publicStatus(snapshot: BridgeSnapshot) {
     evaluation: snapshot.evaluationTrial > 0
       ? { hits: snapshot.evaluationHits, trials: snapshot.evaluationTrial }
       : null,
-    privacyBoundary: "Raw ARKit transforms and gaze coordinates are not shared with VoiceOS.",
+    privacyBoundary: "Status never includes gaze coordinates. capture_gaze returns only coordinates relative to its approved image.",
   };
 }
 
@@ -281,6 +647,63 @@ async function run(command: BridgeCommand) {
   }
 }
 
+function toolErrorResult(error: BridgeToolError) {
+  return {
+    isError: true,
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({ code: error.code, message: error.message, retryable: error.retryable }),
+    }],
+  };
+}
+
+function protocolErrorResult(error: BridgeProtocolError) {
+  return toolErrorResult(new BridgeToolError(error.code, error.message, false));
+}
+
+async function runControlTool(name: "recalibrate_eagleeye" | "start_gaze_evaluation") {
+  try {
+    const snapshot = await callCompanionTool(name, {});
+    return jsonResult({ ...publicStatus(snapshot), ...statusCard(snapshot) });
+  } catch (error: unknown) {
+    if (error instanceof CompanionUnavailableError) return companionSetupResult(error);
+    if (error instanceof BridgeToolError) return toolErrorResult(error);
+    if (error instanceof BridgeProtocolError) return protocolErrorResult(error);
+    throw error;
+  }
+}
+
+async function runCapture(marker: "circle" | "square") {
+  try {
+    const capture = await callCompanionTool("capture_gaze", { marker });
+    const metadata = capture.metadata;
+    return {
+      content: [
+        { type: "image" as const, mimeType: metadata.mimeType, data: capture.image.toString("base64") },
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            coordinateSpace: "image_pixels",
+            image: { width: metadata.width, height: metadata.height },
+            gaze: metadata.gaze,
+            marker: metadata.marker,
+            scope: metadata.scope,
+            capturedAt: metadata.capturedAt,
+            region: metadata.region,
+            enrichment: metadata.enrichment,
+            enrichmentWarning: metadata.enrichmentWarning,
+          }),
+        },
+      ],
+    };
+  } catch (error: unknown) {
+    if (error instanceof CompanionUnavailableError) return companionSetupResult(error);
+    if (error instanceof BridgeToolError) return toolErrorResult(error);
+    if (error instanceof BridgeProtocolError) return protocolErrorResult(error);
+    throw error;
+  }
+}
+
 const server = new McpServer({ name: "eaglegaze", version: "0.2.0" });
 
 server.registerTool(
@@ -295,14 +718,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "start_gaze_calibration",
+  "recalibrate_eagleeye",
   {
-    title: "Start gaze calibration",
+    title: "Recalibrate EagleEye",
     description:
-      "Start EagleGaze's full-screen nine-point calibration on this Mac. Use when the user asks to calibrate, recalibrate, or set up eye tracking.",
+      "Replace the current EagleEye calibration by starting EagleGaze's full-screen nine-point calibration on this Mac. Use when the user asks to calibrate or recalibrate eye tracking.",
     inputSchema: {},
   },
-  async () => await run("start_calibration"),
+  async () => await runControlTool("recalibrate_eagleeye"),
 );
 
 server.registerTool(
@@ -313,18 +736,27 @@ server.registerTool(
       "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
     inputSchema: {},
   },
-  async () => await run("start_evaluation"),
+  async () => process.env.EAGLEGAZE_ENABLE_EVALUATION === "1"
+    ? await runControlTool("start_gaze_evaluation")
+    : toolErrorResult(new BridgeToolError(
+      "feature_disabled",
+      "Gaze evaluation is installed but disabled. Set EAGLEGAZE_ENABLE_EVALUATION=1 when launching the VoiceOS adapter to enable it.",
+      false,
+    )),
 );
 
 server.registerTool(
-  "reset_gaze_calibration",
+  "capture_gaze",
   {
-    title: "Reset gaze calibration",
+    title: "Capture gaze",
     description:
-      "Clear EagleGaze's current calibration and return it to setup. Use only when the user explicitly asks to reset or clear eye-tracking calibration.",
-    inputSchema: {},
+      "Capture one approved screenshot region containing the estimated gaze, mark that gaze, and return the image, image-relative coordinates, bounded region metadata, and optional untrusted provider enrichment. Use when the user asks to show or identify what they are looking at.",
+    inputSchema: {
+      marker: z.enum(["circle", "square"]).optional().default("circle")
+        .describe("Shape drawn around the estimated gaze location."),
+    },
   },
-  async () => await run("reset_calibration"),
+  async ({ marker }) => await runCapture(marker),
 );
 
 await server.connect(new StdioServerTransport());

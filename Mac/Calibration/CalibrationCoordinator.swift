@@ -1,5 +1,8 @@
 import Foundation
 import GazeCore
+import OSLog
+
+private let calibrationCoordinatorLog = Logger(subsystem: "com.aviary.EagleGazeMac", category: "calibration")
 
 /// The physical source/display arrangement used by a calibration session.
 public struct CalibrationContext: Equatable, Sendable {
@@ -57,9 +60,16 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
     public let targetIndex: Int
     public let targetCount: Int
     public let sampleCount: Int
+    public let rejectedSampleCount: Int
     public let trialIndex: Int
     public let trialCount: Int
     public let evaluationHits: Int
+    public let targetProgress: Double
+    public let targetDispersion: Double?
+    public let targetRetryCount: Int
+    public let holdReason: CalibrationHoldReason?
+    public let calibrationRunID: UUID?
+    public let targetEpoch: UInt64
     public let profile: CalibrationProfile?
     public let mappedPoint: Point2D?
     public let isPaused: Bool
@@ -73,9 +83,16 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
         targetIndex: Int = 0,
         targetCount: Int = 0,
         sampleCount: Int = 0,
+        rejectedSampleCount: Int = 0,
         trialIndex: Int = 0,
         trialCount: Int = 0,
         evaluationHits: Int = 0,
+        targetProgress: Double = 0,
+        targetDispersion: Double? = nil,
+        targetRetryCount: Int = 0,
+        holdReason: CalibrationHoldReason? = nil,
+        calibrationRunID: UUID? = nil,
+        targetEpoch: UInt64 = 0,
         profile: CalibrationProfile? = nil,
         mappedPoint: Point2D? = nil,
         isPaused: Bool = false,
@@ -88,9 +105,16 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
         self.targetIndex = targetIndex
         self.targetCount = targetCount
         self.sampleCount = sampleCount
+        self.rejectedSampleCount = rejectedSampleCount
         self.trialIndex = trialIndex
         self.trialCount = trialCount
         self.evaluationHits = evaluationHits
+        self.targetProgress = targetProgress
+        self.targetDispersion = targetDispersion
+        self.targetRetryCount = targetRetryCount
+        self.holdReason = holdReason
+        self.calibrationRunID = calibrationRunID
+        self.targetEpoch = targetEpoch
         self.profile = profile
         self.mappedPoint = mappedPoint
         self.isPaused = isPaused
@@ -223,7 +247,9 @@ public final class CalibrationCoordinator: @unchecked Sendable {
         do {
             let events = try engine.startCalibration(at: timestamp)
             self.engine = engine
-            profile = nil
+            calibrationCoordinatorLog.notice(
+                "Calibration run started run=\(engine.state.calibrationRunID?.uuidString.prefix(8) ?? "none", privacy: .public) lastKnownGood=\(self.profile != nil, privacy: .public)"
+            )
             snapshot = makeSnapshot(paused: false)
             return publish(engineEvents(events))
         } catch let error as CalibrationEngineError {
@@ -251,11 +277,33 @@ public final class CalibrationCoordinator: @unchecked Sendable {
     }
 
     @discardableResult
+    public func startRecenter() throws -> [CalibrationCoordinatorEvent] {
+        try startRecenter(at: clock())
+    }
+
+    @discardableResult
+    public func startRecenter(at timestamp: TimeInterval) throws -> [CalibrationCoordinatorEvent] {
+        guard context != nil, var engine else { throw CalibrationCoordinatorError.contextNotConfigured }
+        guard profile != nil else { throw CalibrationCoordinatorError.noProfile }
+        do {
+            let events = try engine.startRecenter(at: timestamp)
+            self.engine = engine
+            snapshot = makeSnapshot(paused: false)
+            calibrationCoordinatorLog.notice("One-point recenter started")
+            return publish(engineEvents(events))
+        } catch let error as CalibrationEngineError {
+            return try fail(error)
+        }
+    }
+
+    @discardableResult
     public func consume(_ frame: CanonicalGazeFrame) throws -> [CalibrationCoordinatorEvent] {
         guard context != nil, var engine else { throw CalibrationCoordinatorError.contextNotConfigured }
         guard !snapshot.isPaused else { throw CalibrationCoordinatorError.paused }
         do {
-            let events = try engine.consume(frame)
+            // `frame.captureUptime` belongs to the source device. Calibration
+            // timing must use this Mac's monotonic clock instead.
+            let events = try engine.consume(frame, at: clock())
             self.engine = engine
             let mapped = profile?.apply(to: frame.point)
             return publish(engineEvents(events, mappedPoint: mapped))
@@ -386,9 +434,16 @@ public final class CalibrationCoordinator: @unchecked Sendable {
             targetIndex: state.targetIndex,
             targetCount: state.targetCount,
             sampleCount: state.sampleCount,
+            rejectedSampleCount: state.rejectedSampleCount,
             trialIndex: state.trialIndex,
             trialCount: state.trialCount,
             evaluationHits: state.evaluationHits,
+            targetProgress: state.targetProgress,
+            targetDispersion: state.targetDispersion,
+            targetRetryCount: state.targetRetryCount,
+            holdReason: state.holdReason,
+            calibrationRunID: state.calibrationRunID,
+            targetEpoch: state.targetEpoch,
             profile: profile,
             mappedPoint: mappedPoint,
             isPaused: paused ?? snapshot.isPaused,
@@ -402,10 +457,41 @@ public final class CalibrationCoordinator: @unchecked Sendable {
     ) -> [CalibrationCoordinatorEvent] {
         var result = engineEvents.map(CalibrationCoordinatorEvent.engine)
         for event in engineEvents {
-            if case let .calibrationCompleted(completedProfile) = event {
+            switch event {
+            case let .calibrationCompleted(completedProfile):
                 profile = completedProfile
                 profileStore.save(completedProfile)
                 result.append(.profileSaved(completedProfile))
+                calibrationCoordinatorLog.notice(
+                    "Calibration committed model=\(completedProfile.quality.modelName ?? "legacy", privacy: .public) samples=\(completedProfile.quality.sampleCount, privacy: .public) validationRMS=\(completedProfile.quality.validationRMSError ?? -1, format: .fixed(precision: 4), privacy: .public)"
+                )
+            case let .recenterCompleted(updatedProfile, correction):
+                profile = updatedProfile
+                profileStore.save(updatedProfile)
+                result.append(.profileSaved(updatedProfile))
+                calibrationCoordinatorLog.notice(
+                    "Recenter committed dx=\(correction.x, format: .fixed(precision: 4), privacy: .public) dy=\(correction.y, format: .fixed(precision: 4), privacy: .public)"
+                )
+            case let .targetStarted(mode, index, _):
+                calibrationCoordinatorLog.info(
+                    "Target started mode=\(mode.rawValue, privacy: .public) index=\(index, privacy: .public) epoch=\(self.engine?.state.targetEpoch ?? 0, privacy: .public)"
+                )
+            case let .targetRetried(mode, index, retry, reason):
+                calibrationCoordinatorLog.warning(
+                    "Target retry mode=\(mode.rawValue, privacy: .public) index=\(index, privacy: .public) retry=\(retry, privacy: .public) reason=\(reason.rawValue, privacy: .public)"
+                )
+            case let .candidateFitted(report):
+                calibrationCoordinatorLog.notice("Candidate fitted \(report.summary, privacy: .public)")
+            case let .validationCompleted(rms, worst, accepted):
+                calibrationCoordinatorLog.notice(
+                    "Candidate validation accepted=\(accepted, privacy: .public) rms=\(rms, format: .fixed(precision: 4), privacy: .public) worst=\(worst, format: .fixed(precision: 4), privacy: .public)"
+                )
+            case .sampleRejected:
+                if let rejected = self.engine?.state.rejectedSampleCount, rejected.isMultiple(of: 30) {
+                    calibrationCoordinatorLog.debug("Calibration rejected samples=\(rejected, privacy: .public)")
+                }
+            case .sampleAccepted, .validationTrialCompleted, .evaluationTrialCompleted, .evaluationCompleted:
+                break
             }
         }
         snapshot = makeSnapshot(mappedPoint: mappedPoint)

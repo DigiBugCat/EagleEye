@@ -55,6 +55,7 @@ private func testPlan() throws -> CalibrationPlan {
     let expectedDate = Date(timeIntervalSince1970: 1_700_000_000)
     let coordinator = CalibrationCoordinator(
         plan: try testPlan(),
+        profileStore: InMemoryCalibrationProfileStore(),
         clock: { testClock.uptime },
         wallClock: { expectedDate }
     )
@@ -75,7 +76,7 @@ private func testPlan() throws -> CalibrationPlan {
 }
 
 @Test func contextChangeResetsAndPausesTheCurrentSession() throws {
-    let coordinator = CalibrationCoordinator(plan: try testPlan())
+    let coordinator = CalibrationCoordinator(plan: try testPlan(), profileStore: InMemoryCalibrationProfileStore())
     try coordinator.setContext(sourceID: "phone-a", displayID: "main", setupID: "mount-a")
     try coordinator.startCalibration(at: 0)
     #expect(coordinator.snapshot.phase == .calibrating)
@@ -93,11 +94,19 @@ private func testPlan() throws -> CalibrationPlan {
 }
 
 @Test func fineAdjustmentIsAppliedAndResetWithoutChangingBaseMapping() throws {
-    let coordinator = CalibrationCoordinator(plan: try testPlan())
+    let testClock = TestClock(0)
+    let coordinator = CalibrationCoordinator(
+        plan: try testPlan(),
+        profileStore: InMemoryCalibrationProfileStore(),
+        clock: { testClock.uptime }
+    )
     try coordinator.setContext(sourceID: "phone-a", displayID: "main", setupID: "mount-a")
     try coordinator.startCalibration(at: 0)
+    testClock.uptime = 1
     try coordinator.consume(frame(sourceID: "phone-a", point: Point2D(x: 0, y: 0), uptime: 1, sequence: 1))
+    testClock.uptime = 2
     try coordinator.consume(frame(sourceID: "phone-a", point: Point2D(x: 1, y: 0), uptime: 2, sequence: 2))
+    testClock.uptime = 3
     try coordinator.consume(frame(sourceID: "phone-a", point: Point2D(x: 0, y: 1), uptime: 3, sequence: 3))
 
     let base = coordinator.activeProfile?.baseTransform
@@ -112,21 +121,63 @@ private func testPlan() throws -> CalibrationPlan {
 
 @Test func profileStoreRestoresProfileForEvaluation() throws {
     let store = InMemoryCalibrationProfileStore()
-    let first = CalibrationCoordinator(plan: try testPlan(), profileStore: store)
+    let firstClock = TestClock(0)
+    let first = CalibrationCoordinator(plan: try testPlan(), profileStore: store, clock: { firstClock.uptime })
     try first.setContext(sourceID: "phone-a", displayID: "main", setupID: "mount-a")
     try first.startCalibration(at: 0)
+    firstClock.uptime = 1
     try first.consume(frame(sourceID: "phone-a", point: Point2D(x: 0, y: 0), uptime: 1, sequence: 1))
+    firstClock.uptime = 2
     try first.consume(frame(sourceID: "phone-a", point: Point2D(x: 1, y: 0), uptime: 2, sequence: 2))
+    firstClock.uptime = 3
     try first.consume(frame(sourceID: "phone-a", point: Point2D(x: 0, y: 1), uptime: 3, sequence: 3))
 
-    let second = CalibrationCoordinator(plan: try testPlan(), profileStore: store)
+    let secondClock = TestClock(4)
+    let second = CalibrationCoordinator(plan: try testPlan(), profileStore: store, clock: { secondClock.uptime })
     try second.setContext(sourceID: "phone-a", displayID: "main", setupID: "mount-a")
     #expect(second.snapshot.profile != nil)
     #expect(second.snapshot.phase == .calibrated)
     try second.startEvaluation(at: 4)
+    secondClock.uptime = 5
     try second.consume(frame(sourceID: "phone-a", point: Point2D(x: 0.5, y: 0.5), uptime: 5, sequence: 1))
     #expect(second.snapshot.phase == .complete)
     #expect(second.snapshot.evaluationHits == 1)
+}
+
+@Test func recalibrationStartsFreshAndCancelRestoresLastSavedProfile() throws {
+    let store = InMemoryCalibrationProfileStore()
+    let testClock = TestClock(0)
+    let coordinator = CalibrationCoordinator(
+        plan: try testPlan(),
+        profileStore: store,
+        clock: { testClock.uptime }
+    )
+    let source: GazeSourceID = "phone-a"
+    try coordinator.setContext(sourceID: source, displayID: "main", setupID: "mount-a")
+    try coordinator.startCalibration()
+    testClock.uptime = 1
+    try coordinator.consume(frame(sourceID: source, point: Point2D(x: 0, y: 0), uptime: 1, sequence: 1))
+    testClock.uptime = 2
+    try coordinator.consume(frame(sourceID: source, point: Point2D(x: 1, y: 0), uptime: 2, sequence: 2))
+    testClock.uptime = 3
+    try coordinator.consume(frame(sourceID: source, point: Point2D(x: 0, y: 1), uptime: 3, sequence: 3))
+
+    let savedProfile = try #require(coordinator.activeProfile)
+    #expect(store.profile(for: savedProfile.key) == savedProfile)
+
+    testClock.uptime = 4
+    try coordinator.startCalibration()
+    #expect(coordinator.snapshot.phase == .calibrating)
+    #expect(coordinator.snapshot.targetIndex == 0)
+    #expect(coordinator.snapshot.sampleCount == 0)
+    // Recalibration is transactional: the last accepted profile remains active
+    // until the replacement candidate passes independent validation.
+    #expect(coordinator.snapshot.profile == savedProfile)
+    #expect(store.profile(for: savedProfile.key) == savedProfile)
+
+    try coordinator.reset()
+    #expect(coordinator.snapshot.phase == .calibrated)
+    #expect(coordinator.snapshot.profile == savedProfile)
 }
 
 @Test func menuBarStatusPrioritizesConnectionAndActiveWork() {

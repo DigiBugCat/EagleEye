@@ -45,7 +45,7 @@ that omitted file.
 
 There are two local hops, and neither requires entering an IP address:
 
-1. After QR pairing and explicit Mac selection, EagleGazePhone browses for the
+1. After nearby pairing, numeric confirmation, and explicit Mac selection, EagleGazePhone browses for the
    paired Mac's `_eagle-gaze._udp` service with Bonjour, verifies its receiver
    fingerprint, and opens a fresh authenticated stream on the same local
    network.
@@ -58,7 +58,9 @@ gaze packet. It intentionally does not expose the phone's user-assigned name.
 ## Boundary
 
 - Swift owns the calibration model and full-display overlay.
-- TypeScript can read coarse state and request start/reset actions.
+- TypeScript exposes `get_gaze_status`, `recalibrate_eagleeye`,
+  `start_gaze_evaluation`, and `capture_gaze`. Evaluation is always advertised
+  but returns `feature_disabled` unless `EAGLEGAZE_ENABLE_EVALUATION=1`.
 - The Swift composition root injects `GazeApplicationService` into
   `VoiceOSBridge`. Its `GazeApplicationSnapshot` contains only source kind,
   connection, calibration, evaluation, sample/trial counts, and overlay
@@ -67,13 +69,18 @@ gaze packet. It intentionally does not expose the phone's user-assigned name.
   and exists only while older app composition code migrates.
 - Acting tools have VoiceOS confirmation cards before their handlers run.
 - The bridge accepts only loopback TCP. Any process already running as this Mac
-  user can request these narrow, reversible commands; VoiceOS still confirms
-  acting tools before it calls them.
+  user can connect, so loopback alone does not authorize screenshot export.
+  EagleGazeMac requires its own per-capture preview approval before returning
+  image bytes; VoiceOS also confirms acting tools before it calls them.
 - The manifest declares only `127.0.0.1`, but a `local-mcp` server is still
   executable code running as the signed-in user. Treat the folder as trusted
   code; the manifest permission is not a substitute for OS process sandboxing.
-- MCP results exclude raw ARKit transforms, blink values, gaze rays, and mapped
-  gaze coordinates. VoiceOS receives connection and calibration state only.
+- MCP results exclude raw ARKit transforms, blink values, gaze rays, global
+  screen coordinates, and continuous gaze. After an EagleGazeMac-owned preview
+  and per-capture approval, `capture_gaze` may return one annotated semantic or
+  fallback region, coordinates relative only to that returned image, bounded
+  region metadata, and optional provider enrichment explicitly marked as
+  external and untrusted.
 - When the Mac companion cannot be reached, the adapter returns an install/open
   card with a user-selected HTTPS link. It performs no download, installation,
   shell command, or application launch itself.

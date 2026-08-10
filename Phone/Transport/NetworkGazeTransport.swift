@@ -1,5 +1,8 @@
 import Foundation
 import Network
+import OSLog
+
+private let networkGazeLog = Logger(subsystem: "com.aviary.EagleGazePhone", category: "gaze-network")
 
 public final class NetworkGazeReceiverBrowser: GazeReceiverBrowser, @unchecked Sendable {
     public var stateChanged: (@Sendable (GazeBrowserState) -> Void)?
@@ -109,6 +112,7 @@ public final class NetworkGazeDatagramConnection: GazeDatagramConnection, @unche
 
     private let connection: NWConnection
     private let queue: DispatchQueue
+    private var hasLoggedFirstSend = false
 
     init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
@@ -117,7 +121,9 @@ public final class NetworkGazeDatagramConnection: GazeDatagramConnection, @unche
             guard let self else { return }
             switch state {
             case .setup: self.stateChanged?(.starting)
-            case .ready: self.stateChanged?(.ready)
+            case .ready:
+                networkGazeLog.notice("UDP gaze path ready endpoint=\(String(describing: self.connection.endpoint), privacy: .public)")
+                self.stateChanged?(.ready)
             case .waiting(let error): self.stateChanged?(.waiting(error.localizedDescription))
             case .failed(let error): self.stateChanged?(.failed(error.localizedDescription))
             case .cancelled: self.stateChanged?(.cancelled)
@@ -129,7 +135,15 @@ public final class NetworkGazeDatagramConnection: GazeDatagramConnection, @unche
     public func start() { connection.start(queue: queue) }
 
     public func send(_ data: Data, completion: @escaping @Sendable (Error?) -> Void) {
-        connection.send(content: data, completion: .contentProcessed(completion))
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            if let error {
+                networkGazeLog.error("UDP gaze send failed error=\(error.localizedDescription, privacy: .public)")
+            } else if self?.hasLoggedFirstSend == false {
+                self?.hasLoggedFirstSend = true
+                networkGazeLog.notice("First UDP gaze datagram sent bytes=\(data.count, privacy: .public)")
+            }
+            completion(error)
+        })
     }
 
     public func cancel() { connection.cancel() }
@@ -152,6 +166,7 @@ public final class NetworkGazeDatagramConnectionFactory: GazeDatagramConnectionF
         case .host(let name, let port):
             networkEndpoint = .hostPort(host: NWEndpoint.Host(name), port: NWEndpoint.Port(rawValue: port) ?? .any)
         }
+        networkGazeLog.info("Creating UDP gaze path endpoint=\(String(describing: networkEndpoint), privacy: .public)")
         return NetworkGazeDatagramConnection(
             connection: NWConnection(to: networkEndpoint, using: parameters),
             queue: queue

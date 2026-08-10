@@ -1,6 +1,6 @@
 import Foundation
 
-/// The version of the QR pairing offer and pairing transcript understood by
+/// The version of the nearby pairing offer and pairing transcript understood by
 /// this package.  Versioning is deliberately explicit so an offer from a
 /// newer application is never silently interpreted as this one.
 public enum PairingProtocol {
@@ -20,7 +20,7 @@ public enum PairingOfferError: Error, Equatable, Sendable {
     case expired
 }
 
-/// The short-lived object represented by the pairing QR code.
+/// The Mac's short-lived key-agreement offer for a nearby pairing attempt.
 public struct PairingOffer: Codable, Equatable, Sendable {
     public static let currentVersion = PairingProtocol.currentVersion
 
@@ -78,7 +78,7 @@ public struct PairingOffer: Codable, Equatable, Sendable {
         }
         guard now < expiresAt else { throw PairingOfferError.expired }
         // Codable decoding can bypass the throwing initializer, so validate
-        // every field again when an offer arrives from QR/JSON data.
+        // every field again when an offer arrives from untrusted wire data.
         guard !offerID.isZero else { throw PairingOfferError.invalidOfferID }
         guard !receiverFingerprint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PairingOfferError.invalidReceiverFingerprint

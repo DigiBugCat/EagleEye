@@ -1,19 +1,19 @@
 import Foundation
 import GazeCore
+import OSLog
 #if canImport(Security)
 import Security
 #endif
 
 public struct PairingControlCandidate: Codable, Equatable, Hashable, Identifiable, Sendable {
     public let id: String
-    /// When Bonjour exposes a service name, this is the identity advertised by
-    /// the Mac. A nil value means the transport must establish identity from
-    /// the authenticated response rather than selecting by result order.
-    public let serviceIdentity: String?
+    /// Unauthenticated Bonjour label shown only to help the user choose a Mac.
+    /// Cryptographic identity is established by the offer transcript and code.
+    public let displayName: String
 
-    public init(id: String, serviceIdentity: String? = nil) {
+    public init(id: String, displayName: String) {
         self.id = id
-        self.serviceIdentity = serviceIdentity
+        self.displayName = displayName
     }
 }
 
@@ -28,7 +28,7 @@ public protocol PairingControlTransport: AnyObject {
     func connect(to candidate: PairingControlCandidate, timeout: Duration) async throws -> PairingControlChannel
 }
 
-public enum PairingControlClientError: Error, Equatable, Sendable {
+public enum PairingControlClientError: Error, Equatable, Sendable, LocalizedError {
     case noMatchingReceiver
     case ambiguousReceiver
     case timeout
@@ -38,6 +38,20 @@ public enum PairingControlClientError: Error, Equatable, Sendable {
     case invalidProof
     case offerExpired
     case transport(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noMatchingReceiver: "The saved Mac could not be authenticated nearby."
+        case .ambiguousReceiver: "More than one Mac accepted the same pairing identity."
+        case .timeout: "The Mac did not respond in time."
+        case .rejected(let reason): reason.map { "The Mac rejected pairing: \($0)" } ?? "The Mac rejected pairing."
+        case .invalidResponse: "The Mac returned an invalid pairing response."
+        case .identityMismatch: "The Mac identity no longer matches this saved pairing."
+        case .invalidProof: "The Mac could not prove the saved pairing identity."
+        case .offerExpired: "The pairing request expired. Please try again."
+        case .transport(let detail): "The local connection failed: \(detail)"
+        }
+    }
 }
 
 public struct PhoneGazeSessionMaterial: Equatable, Sendable {
@@ -54,9 +68,10 @@ public struct PhoneGazeSessionMaterial: Equatable, Sendable {
 
 /// Phone initiator for the authenticated TCP control plane. No pairing record
 /// is persisted until the Mac's approval HMAC verifies with locally-derived
-/// pairing material and all advertised identities match the scanned offer.
+/// pairing material and the user confirms the transcript code on the Mac.
 public final class PairingControlClient: @unchecked Sendable {
     public static let serviceType = "_eagle-gaze-pair._tcp"
+    private static let logger = Logger(subsystem: "com.aviary.EagleGazePhone", category: "pairing")
 
     private let identityStore: PhoneDeviceIdentityStore
     private let receiverStore: PairedReceiverStore
@@ -87,9 +102,42 @@ public final class PairingControlClient: @unchecked Sendable {
         self.responseTimeout = responseTimeout
     }
 
-    public func pair(qrPayload: String, displayName: String) async throws -> PairedReceiver {
-        let offer = try PairingOfferParser(clock: clock).parse(qrPayload)
-        return try await pair(offer: offer, displayName: displayName)
+    public func discoverNearbyMacs() async throws -> [PairingControlCandidate] {
+        Self.logger.info("Nearby Mac discovery started")
+        let candidates = try await transport.browse(timeout: browseTimeout).sorted { lhs, rhs in
+            if lhs.displayName != rhs.displayName { return lhs.displayName < rhs.displayName }
+            return lhs.id < rhs.id
+        }
+        Self.logger.info("Nearby Mac discovery completed count=\(candidates.count, privacy: .public)")
+        return candidates
+    }
+
+    public func pair(
+        candidate: PairingControlCandidate,
+        displayName: String,
+        onVerificationCode: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> PairedReceiver {
+        let attempt = UUID().uuidString.prefix(8)
+        Self.logger.info("Pairing attempt started attempt=\(attempt, privacy: .public) candidate=\(candidate.displayName, privacy: .public)")
+        let channel = try await transport.connect(to: candidate, timeout: connectTimeout)
+        defer { channel.close() }
+        let reader = PairingControlMessageReader(channel: channel, timeout: responseTimeout)
+        let request = try NearbyPairingOfferRequest()
+        try await channel.send(try PairingWireProtocol.encode(PairingControlMessage.nearbyOfferRequest(request)))
+        let responseMessage = try await reader.next()
+        guard case let .nearbyOfferResponse(response) = responseMessage,
+              response.requestID == request.requestID else {
+            throw PairingControlClientError.invalidResponse
+        }
+        let receiver = try await pair(
+            offer: response.offer,
+            displayName: displayName,
+            channel: channel,
+            reader: reader,
+            onVerificationCode: onVerificationCode
+        )
+        Self.logger.notice("Pairing approved attempt=\(attempt, privacy: .public) receiver=\(receiver.displayName, privacy: .public)")
+        return receiver
     }
 
     public func pair(offer: PairingOffer, displayName: String) async throws -> PairedReceiver {
@@ -116,14 +164,14 @@ public final class PairingControlClient: @unchecked Sendable {
             peerPublicKey: offer.ephemeralPublicKey,
             transcript: transcript
         )
-        let request = try PairingQRRequest(
+        let request = try PairingInitiationRequest(
             offer: offer,
             initiatorDeviceID: identity.deviceID,
             initiatorDisplayName: identity.displayName,
             initiatorEphemeralPublicKey: ephemeral.publicKey,
             material: material
         )
-        let frame = try PairingWireProtocol.encode(PairingControlMessage.qrRequest(request))
+        let frame = try PairingWireProtocol.encode(PairingControlMessage.pairingRequest(request))
 
         let candidates = try await transport.browse(timeout: browseTimeout)
             .sorted { $0.id < $1.id }
@@ -131,7 +179,6 @@ public final class PairingControlClient: @unchecked Sendable {
 
         var approvals: [(PairingControlCandidate, PairingMacResponse)] = []
         for candidate in candidates {
-            if let advertised = candidate.serviceIdentity, advertised != offer.serviceIdentity { continue }
             guard let channel = try? await transport.connect(to: candidate, timeout: connectTimeout) else { continue }
             defer { channel.close() }
             do {
@@ -182,9 +229,84 @@ public final class PairingControlClient: @unchecked Sendable {
         return receiver
     }
 
+    private func pair(
+        offer: PairingOffer,
+        displayName: String,
+        channel: PairingControlChannel,
+        reader: PairingControlMessageReader,
+        onVerificationCode: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> PairedReceiver {
+        do {
+            try offer.validate(at: clock())
+        } catch PairingOfferError.expired {
+            throw PairingControlClientError.offerExpired
+        } catch {
+            throw PairingControlClientError.invalidResponse
+        }
+
+        let identity = try identityStore.loadOrCreate(displayName: displayName)
+        let ephemeral = keyPairFactory()
+        let transcript = try PairingTranscript(
+            offerID: offer.offerID,
+            receiverFingerprint: offer.receiverFingerprint,
+            serviceIdentity: offer.serviceIdentity,
+            receiverEphemeralPublicKey: offer.ephemeralPublicKey,
+            initiatorEphemeralPublicKey: ephemeral.publicKey,
+            oneTimeSecret: offer.oneTimeSecret
+        )
+        let material = try PairingKeyAgreement.derivePairingMaterial(
+            localKeyPair: ephemeral,
+            peerPublicKey: offer.ephemeralPublicKey,
+            transcript: transcript
+        )
+        let request = try PairingInitiationRequest(
+            offer: offer,
+            initiatorDeviceID: identity.deviceID,
+            initiatorDisplayName: identity.displayName,
+            initiatorEphemeralPublicKey: ephemeral.publicKey,
+            material: material
+        )
+        await onVerificationCode(material.verificationCode)
+        try await channel.send(try PairingWireProtocol.encode(PairingControlMessage.pairingRequest(request)))
+        guard let response = try await receiveApproval(
+            channel,
+            offerID: offer.offerID,
+            expectedVerificationCode: material.verificationCode,
+            reader: reader
+        ) else { throw PairingControlClientError.invalidResponse }
+        guard response.receiverFingerprint == offer.receiverFingerprint,
+              response.serviceIdentity == offer.serviceIdentity else {
+            throw PairingControlClientError.identityMismatch
+        }
+        try response.verifyApproval(pairingKey: material.pairingKey)
+        guard let pairID = response.pairID,
+              let deviceID = response.deviceID,
+              let receiverName = response.displayName,
+              let fingerprint = response.receiverFingerprint,
+              let serviceIdentity = response.serviceIdentity,
+              let createdAt = response.createdAt,
+              response.verificationCode == material.verificationCode,
+              response.transcriptMAC == material.transcriptMAC else {
+            throw PairingControlClientError.invalidResponse
+        }
+        let receiver = try PairedReceiver(
+            pairID: pairID,
+            deviceID: deviceID,
+            displayName: receiverName,
+            receiverFingerprint: fingerprint,
+            pairingKey: material.pairingKey,
+            createdAt: createdAt,
+            serviceIdentity: serviceIdentity
+        )
+        try receiverStore.save(receiver)
+        return receiver
+    }
+
     /// Reconnects an existing pair using the caller's lifecycle session ID.
     /// The returned stream key is fresh for every call and is never persisted.
     public func reconnect(receiver: PairedReceiver, sessionID: UUID) async throws -> PhoneGazeSessionMaterial {
+        let attempt = sessionID.uuidString.prefix(8)
+        Self.logger.info("Authentication started session=\(attempt, privacy: .public) receiver=\(receiver.displayName, privacy: .public)")
         let initiatorNonce = try randomNonce()
         let challenge = try ReconnectChallenge(
             pairID: receiver.pairID,
@@ -192,11 +314,11 @@ public final class PairingControlClient: @unchecked Sendable {
             initiatorNonce: initiatorNonce
         )
         let candidates = try await transport.browse(timeout: browseTimeout)
-            .filter { candidate in
-                candidate.serviceIdentity == nil || candidate.serviceIdentity == receiver.serviceIdentity
-            }
             .sorted { $0.id < $1.id }
-        guard !candidates.isEmpty else { throw PairingControlClientError.noMatchingReceiver }
+        guard !candidates.isEmpty else {
+            Self.logger.error("Authentication found no nearby Macs session=\(attempt, privacy: .public)")
+            throw PairingControlClientError.noMatchingReceiver
+        }
         var successes: [ReconnectSessionMaterial] = []
         for candidate in candidates {
             guard let channel = try? await transport.connect(to: candidate, timeout: connectTimeout) else { continue }
@@ -222,9 +344,11 @@ public final class PairingControlClient: @unchecked Sendable {
             } catch { continue }
         }
         guard successes.count == 1 else {
+            Self.logger.error("Authentication failed session=\(attempt, privacy: .public) successes=\(successes.count, privacy: .public)")
             if successes.count > 1 { throw PairingControlClientError.ambiguousReceiver }
             throw PairingControlClientError.noMatchingReceiver
         }
+        Self.logger.notice("Authentication succeeded session=\(attempt, privacy: .public)")
         return PhoneGazeSessionMaterial(successes[0])
     }
 

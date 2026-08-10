@@ -3,8 +3,8 @@
   "description": "Safe local mock inputs used by bun run verify.",
   "tools": {
     "get_gaze_status": {"args": {}, "expectedGlanceBlocks": 2},
-    "start_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2},
-    "start_gaze_evaluation": {"args": {}, "expectedGlanceBlocks": 2},
-    "reset_gaze_calibration": {"args": {}, "expectedGlanceBlocks": 2}
+    "recalibrate_eagleeye": {"args": {}, "expectedGlanceBlocks": 2},
+    "start_gaze_evaluation": {"args": {}, "expectedErrorCode": "feature_disabled"},
+    "capture_gaze": {"args": {"marker": "circle"}, "expectedCoordinateSpace": "image_pixels"}
   }
 }

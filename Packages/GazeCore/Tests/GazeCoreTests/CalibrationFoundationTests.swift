@@ -156,6 +156,26 @@ private func canonicalFrame(
     #expect(engine.state.sampleCount == 1)
 }
 
+@Test func remoteFrameUsesConsumerClockForCalibrationTiming() throws {
+    let timing = try CalibrationTimingConfiguration(
+        settleDuration: 0,
+        collectDuration: 1,
+        minimumSamplesPerTarget: 1
+    )
+    let plan = try CalibrationPlan(
+        targets: [Point2D(x: 0, y: 0), Point2D(x: 1, y: 0), Point2D(x: 0, y: 1)],
+        timing: timing
+    )
+    let key = CalibrationProfileKey(sourceID: "phone", displayID: "main", setupID: "mount")
+    var engine = CalibrationEngine(plan: plan, profileKey: key)
+    _ = try engine.startCalibration(at: 10_000)
+
+    // The phone booted much later than the Mac, so its uptime is unrelated.
+    // The local receipt timestamp still advances the target deterministically.
+    _ = try engine.consume(canonicalFrame(captureUptime: 12), at: 10_001)
+    #expect(engine.state.targetIndex == 1)
+}
+
 @Test func calibrationEngineRestoresValidatedProfileWithoutDerivingMonotonicTime() throws {
     let timing = try CalibrationTimingConfiguration(settleDuration: 0, collectDuration: 1, minimumSamplesPerTarget: 1)
     let plan = try CalibrationPlan(

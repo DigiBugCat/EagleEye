@@ -1,5 +1,8 @@
 import Foundation
 import GazeCore
+import OSLog
+
+private let gazeCoordinatorLog = Logger(subsystem: "com.aviary.EagleGazePhone", category: "gaze-transport-coordinator")
 
 /// Owns receiver selection and one authenticated stream.  Discovery may find
 /// many receivers; this type never chooses one implicitly.
@@ -21,6 +24,8 @@ public final class GazeTransportCoordinator {
     private var reconnectTask: Task<Void, Never>?
     private var retryAttempt = 0
     private var running = false
+    private var hasLoggedFirstQueuedFrame = false
+    private var selectedReceiverWasUnavailable = false
 
     public init(
         browser: GazeReceiverBrowser,
@@ -55,10 +60,26 @@ public final class GazeTransportCoordinator {
         latestSender?.stop()
         latestSender = nil
         pendingLatest = nil
+        selectedReceiverWasUnavailable = false
         connection?.cancel()
         connection = nil
         browser.stop()
         updateState(.cancelled)
+    }
+
+    /// Flushes Bonjour's current result set without changing the saved peer
+    /// or session material. UDP readiness cannot prove a remote listener is
+    /// alive, so composition calls this after control-plane authentication to
+    /// avoid selecting a service instance cached from a previous Mac process.
+    public func restartDiscovery() {
+        guard running else {
+            start()
+            return
+        }
+        browser.stop()
+        discoveredReceivers.removeAll()
+        onReceiversChanged?(discoveredReceivers)
+        browser.start()
     }
 
     /// Selects one discovered receiver and fresh session material.  The
@@ -115,24 +136,32 @@ public final class GazeTransportCoordinator {
     public func clearSelection() {
         disconnect()
         selectedReceiver = nil
+        selectedReceiverWasUnavailable = false
         updateState(running ? .starting : .cancelled)
     }
 
     public func sendLatest(_ frame: CanonicalGazeFrame) {
         guard let selectedReceiver else {
             lastError = GazeTransportError.noSelectedReceiver
+            gazeCoordinatorLog.error("Gaze frame dropped reason=no-selected-receiver sequence=\(frame.sequence, privacy: .public)")
             return
         }
-        guard let encoded = try? codec.encode(frame, session: selectedReceiver.session) else {
-            do {
-                _ = try codec.encode(frame, session: selectedReceiver.session)
-            } catch {
-                lastError = error
-            }
+        let encoded: Data
+        do {
+            encoded = try codec.encode(frame, session: selectedReceiver.session)
+        } catch {
+            lastError = error
+            gazeCoordinatorLog.error(
+                "Gaze frame encode failed sequence=\(frame.sequence, privacy: .public) frameSession=\(frame.sourceSessionID.uuidString.prefix(8), privacy: .public) transportSession=\(selectedReceiver.session.sessionID.uuidString.prefix(8), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
             return
         }
         pendingLatest = encoded
         latestSender?.sendLatest(encoded)
+        if !hasLoggedFirstQueuedFrame {
+            hasLoggedFirstQueuedFrame = true
+            gazeCoordinatorLog.notice("First authenticated gaze datagram queued sequence=\(frame.sequence, privacy: .public) bytes=\(encoded.count, privacy: .public)")
+        }
     }
 
     #if DEBUG
@@ -154,11 +183,38 @@ public final class GazeTransportCoordinator {
     private func handleReceiversChanged(_ receivers: [DiscoveredGazeReceiver]) {
         discoveredReceivers = Dictionary(uniqueKeysWithValues: receivers.map { ($0.id, $0) })
         onReceiversChanged?(discoveredReceivers)
-        guard let selectedReceiver,
-              let current = discoveredReceivers[selectedReceiver.receiverID],
-              (current.endpoint != selectedReceiver.endpoint ||
-               current.receiverFingerprint != selectedReceiver.receiverFingerprint)
-        else { return }
+        guard let selectedReceiver else { return }
+        guard let current = discoveredReceivers[selectedReceiver.receiverID] else {
+            if !selectedReceiverWasUnavailable {
+                selectedReceiverWasUnavailable = true
+                disconnectConnectionOnly()
+                updateState(.waiting("Selected Mac is unavailable"))
+            }
+            return
+        }
+        if selectedReceiverWasUnavailable {
+            selectedReceiverWasUnavailable = false
+            guard current.receiverFingerprint == selectedReceiver.receiverFingerprint else {
+                disconnect()
+                self.selectedReceiver = nil
+                lastError = GazeTransportError.receiverIdentityMismatch
+                updateState(.failed("Receiver identity changed; select it again"))
+                return
+            }
+            // A restarted Mac cannot reuse the previous ephemeral stream key.
+            // Preserve its verified durable identity and ask composition for
+            // a fresh saved-pair authentication.
+            self.selectedReceiver = PairedGazeReceiver(
+                receiverID: selectedReceiver.receiverID,
+                receiverFingerprint: selectedReceiver.receiverFingerprint,
+                endpoint: current.endpoint,
+                session: selectedReceiver.session
+            )
+            updateState(.failed("Selected Mac returned; refreshing authentication"))
+            return
+        }
+        guard current.endpoint != selectedReceiver.endpoint ||
+              current.receiverFingerprint != selectedReceiver.receiverFingerprint else { return }
         if current.receiverFingerprint != selectedReceiver.receiverFingerprint {
             // A changed identity is not a reconnectable path. Requiring an
             // explicit reselection prevents a stale pairing from streaming to
@@ -246,6 +302,7 @@ public final class GazeTransportCoordinator {
         latestSender?.stop()
         latestSender = nil
         pendingLatest = nil
+        hasLoggedFirstQueuedFrame = false
         connection?.cancel()
         connection = nil
     }

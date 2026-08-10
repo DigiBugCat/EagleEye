@@ -20,8 +20,10 @@ into calibration or presentation code.
   compatibility path, if retained during migration, must be explicit.
 - The iPhone camera is foreground-only. Backgrounding invalidates stream
   freshness; foregrounding creates a new authenticated stream session.
-- VoiceOS receives coarse connection, source, and calibration state only. It
-  does not receive raw or mapped continuous gaze coordinates.
+- VoiceOS receives coarse connection, source, and calibration state. A bounded,
+  explicitly approved `capture_gaze` call may additionally return one annotated
+  image and coordinates relative to that returned image. It never receives raw,
+  global, or continuous gaze coordinates.
 
 ## Module boundaries
 
@@ -44,11 +46,11 @@ vendor SDK, or persistence APIs.
 
 - **Application:** scene lifecycle and dependency composition.
 - **Tracking:** `ARKitFaceTracker` owns `ARSession` and emits ARKit captures.
-- **Pairing:** QR scanning, pairing state, and paired-Mac selection.
+- **Pairing:** nearby-Mac discovery, numeric confirmation, pairing state, and paired-Mac selection.
 - **Persistence:** Keychain-backed paired-device records.
 - **Transport:** Bonjour discovery, authenticated session establishment, and
   encrypted latest-only gaze delivery.
-- **Presentation:** status, paired-Mac picker, pairing scanner, and privacy UI.
+- **Presentation:** status, saved-Mac picker, nearby-Mac pairing, and numeric confirmation.
 
 The phone stops camera and network streaming only on `.background`; transient
 `.inactive` state is handled by ARKit interruption callbacks.
@@ -62,14 +64,49 @@ The phone stops camera and network streaming only on `.background`; transient
   decoding, freshness, and ARKit feature extraction.
 - **Vendor sources:** future adapters such as Tobii implement the same source
   contract and translate vendor coordinates/capabilities at the edge.
-- **Pairing:** expiring QR offer, explicit approval, paired-device inventory,
+- **Pairing:** expiring nearby offer, explicit approval, paired-device inventory,
   revocation, and Keychain persistence.
 - **Calibration:** a UI-independent coordinator around the shared calibration
   engine and profile store.
 - **Presentation:** main window and overlay render published state; they do not
   fit transforms, decode packets, or choose sources.
-- **VoiceOS bridge:** observes coarse application state and requests bounded
-  commands through application services.
+- **VoiceOS bridge:** observes coarse application state, requests bounded
+  commands through application services, and owns the Mac-side capture/preview
+  authorization boundary. It exports no screenshot until the user approves the
+  exact frozen and annotated image.
+
+### `VoiceOS` adapter
+
+The TypeScript adapter exposes four MCP tools:
+
+- `get_gaze_status` for coarse readiness and session state;
+- `recalibrate_eagleeye` for starting a new calibration, replacing separately
+  advertised start/reset tools;
+- `start_gaze_evaluation`, always registered so clients see a stable surface;
+  the adapter returns `feature_disabled` unless
+  `EAGLEGAZE_ENABLE_EVALUATION=1`; and
+- `capture_gaze` for one approved annotated screen-context image plus its
+  image-relative gaze point and uncertainty.
+
+If a loopback connection is refused, the adapter may ask a host-provided,
+bundle-identifier-scoped capability to open EagleGazeMac, wait for readiness,
+and retry the original request once. Arbitrary shell commands, executable paths,
+URLs, and process arguments are not part of this API. If no bounded host action
+exists, the adapter returns the existing install-or-open guidance.
+
+The Mac bridge remains at `127.0.0.1:47474`. Existing v1 newline-delimited JSON
+commands may remain for compatibility. Version 2 carries tool-shaped requests;
+successful image responses consist of a newline-terminated JSON header and
+exactly the declared number of raw image bytes. The header binds the response
+to its request and declares media type, dimensions, and SHA-256. Errors have no
+binary body. Size, timeout, integrity, and single-pending-capture limits are
+enforced on both sides.
+
+`capture_gaze` coordinates use the returned image's top-left as `(0, 0)`, with
+X increasing right and Y increasing down. Pixel and normalized image values may
+be returned. Global display coordinates, display identifiers, raw samples,
+calibration transforms, window titles, application names, and local paths must
+not cross this boundary.
 
 ## Canonical source contract
 
@@ -110,19 +147,25 @@ it does not own calibration math.
 
 ## Pairing and transport contract
 
-- The Mac advertises `_eagle-gaze-pair._tcp` only while an expiring QR offer is
-  visible. The QR contains a version, offer ID, receiver fingerprint, ephemeral
-  public key, one-time secret, service identity, and expiry—not an IP address or
-  durable stream key.
+- The Mac continuously advertises `_eagle-gaze-pair._tcp` on the local network.
+  After the user selects that Bonjour result, the phone requests an expiring
+  offer on the selected connection. The offer contains a version, offer ID,
+  receiver fingerprint, ephemeral public key, one-time secret, service identity,
+  and expiry—not an IP address or durable stream key.
 - Pairing uses CryptoKit P-256 key agreement plus HKDF transcript binding. Both
   sides prove key possession, show the same short verification code, and the Mac
   requires explicit approval before storing the record.
 - Durable records are stored with device-only Keychain accessibility.
 - Each reconnect exchanges fresh nonces and derives a new stream key.
+- A successful pairing is the runtime authorization boundary; there is no
+  separate per-launch consent gate. Removing the saved peer revokes access.
 - Gaze UDP envelopes use ChaCha20-Poly1305. Version, pair ID, session ID, and
   sequence are authenticated associated data. Session nonce prefix plus sequence
   forms a unique nonce. Unknown pairs, invalid tags, replay, and out-of-order
   packets are rejected before decoding gaze data.
+- The Mac gaze listener uses the fixed application port `47475`. Bonjour still
+  discovers the host and verifies its receiver fingerprint, while a stable port
+  prevents an otherwise-valid cached service from targeting a dead prior process.
 
 ## Multi-device behavior
 
@@ -145,6 +188,14 @@ it does not own calibration math.
   source replacement behavior.
 - Integration tests cover pairing, reconnect, revocation, and encrypted
   latest-only delivery with deterministic local transports.
-- VoiceOS verification remains green and exposes no continuous gaze data.
+- VoiceOS verification remains green; the evaluation tool stays advertised but
+  returns `feature_disabled` while its feature flag is off; legacy tools are not
+  advertised; and no continuous or global gaze data is exposed. The direct
+  Swift TCP evaluation operation remains available regardless of that adapter
+  feature flag.
+- Capture tests prove that no image bytes leave before app-owned approval, that
+  cancel/timeout/disconnect discard the pending image, that coordinates match
+  the returned image and marker, and that v2 rejects malformed, truncated,
+  oversized, trailing, or digest-mismatched bodies.
 - Release documentation and privacy disclosures match the implemented data
   flow and permissions.

@@ -51,6 +51,29 @@ public final class KeychainPairedDeviceStore: PairedDeviceStore, @unchecked Send
         }
     }
 
+    /// Reconnect always knows the pair identifier. Querying that exact
+    /// Keychain account avoids a broad match-all operation, which sandboxed
+    /// development signatures can reject with `errSecParam` even though
+    /// exact reads and writes are authorized.
+    public func record(pairID: UUID) throws -> PairedDeviceRecord? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var query = baseQuery
+        query[kSecAttrAccount as String] = pairID.uuidString
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainPairedDeviceStore.error(status)
+        }
+        do { return try JSONDecoder().decode(PairedDeviceRecord.self, from: data) }
+        catch { throw PairedDeviceStoreError.invalidRecord }
+    }
+
     public func save(_ record: PairedDeviceRecord) throws {
         let data: Data
         do {

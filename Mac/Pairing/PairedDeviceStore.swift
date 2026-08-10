@@ -8,6 +8,7 @@ import GazeCore
 /// this protocol and must remain transient.
 public protocol PairedDeviceStore: Sendable {
     func list() throws -> [PairedDeviceRecord]
+    func record(pairID: UUID) throws -> PairedDeviceRecord?
     func save(_ record: PairedDeviceRecord) throws
     func delete(pairID: UUID) throws
 }

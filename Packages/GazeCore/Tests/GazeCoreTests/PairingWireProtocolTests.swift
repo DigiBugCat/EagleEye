@@ -7,10 +7,10 @@ private let wirePairID = UUID(uuidString: "22345678-1234-4234-8234-123456789012"
 private let wireSessionID = UUID(uuidString: "32345678-1234-4234-8234-123456789012")!
 private let wireDeviceID = UUID(uuidString: "42345678-1234-4234-8234-123456789012")!
 
-private func wireRequest() throws -> PairingQRRequest {
+private func wireRequest() throws -> PairingInitiationRequest {
     let key = P256EphemeralKeyPair()
     let receiverKey = P256EphemeralKeyPair()
-    return try PairingQRRequest(
+    return try PairingInitiationRequest(
         offerID: wireOfferID,
         receiverFingerprint: "sha256:receiver",
         serviceIdentity: "eagle-gaze-mac",
@@ -25,13 +25,36 @@ private func wireRequest() throws -> PairingQRRequest {
     )
 }
 
+@Test func nearbyOfferRequestAndResponseRoundTrip() throws {
+    let request = try NearbyPairingOfferRequest(requestID: wireSessionID)
+    let offer = try PairingOffer(
+        offerID: wireOfferID,
+        receiverFingerprint: "sha256:receiver",
+        ephemeralPublicKey: P256EphemeralKeyPair().publicKey,
+        oneTimeSecret: Data(repeating: 4, count: 32),
+        serviceIdentity: "eagle-gaze-mac",
+        expiresAt: Date().addingTimeInterval(60)
+    )
+    let response = try NearbyPairingOfferResponse(requestID: request.requestID, offer: offer)
+
+    for message in [
+        PairingControlMessage.nearbyOfferRequest(request),
+        PairingControlMessage.nearbyOfferResponse(response),
+    ] {
+        let frame = try PairingWireProtocol.encode(message)
+        var decoder = PairingWireFrameDecoder()
+        let payload = try #require(try decoder.append(frame).first)
+        #expect(try PairingWireProtocol.decode(PairingControlMessage.self, payload: payload) == message)
+    }
+}
+
 @Test func pairingWireRequestAndApprovedResponseRoundTrip() throws {
     let request = try wireRequest()
     let requestPayload = try PairingWireProtocol.encode(request)
     var parser = PairingWireFrameDecoder()
     let requestFrames = try parser.append(requestPayload)
     #expect(requestFrames.count == 1)
-    #expect(try PairingWireProtocol.decode(PairingQRRequest.self, payload: requestFrames[0]) == request)
+    #expect(try PairingWireProtocol.decode(PairingInitiationRequest.self, payload: requestFrames[0]) == request)
 
     let response = try PairingMacResponse.approved(
         offerID: wireOfferID, pairID: wirePairID, deviceID: wireDeviceID,
@@ -68,7 +91,7 @@ private func wireRequest() throws -> PairingQRRequest {
     var frames: [Data] = []
     for byte in first + second { frames.append(contentsOf: try parser.append(Data([byte]))) }
     #expect(frames.count == 2)
-    #expect(try PairingWireProtocol.decode(PairingQRRequest.self, payload: frames[0]) == request)
+    #expect(try PairingWireProtocol.decode(PairingInitiationRequest.self, payload: frames[0]) == request)
     #expect(try PairingWireProtocol.decode(PairingMacResponse.self, payload: frames[1]).status == .pending)
     #expect(parser.bufferedByteCount == 0)
 }

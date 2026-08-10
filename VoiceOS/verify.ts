@@ -28,7 +28,7 @@ if (/from\s+["']\.\/bridge\.ts["']/.test(serverSource)) {
 }
 
 const childEnvironment = Object.fromEntries(
-  Object.entries({ ...process.env, EAGLEGAZE_BRIDGE_MOCK: "1" }).filter(
+  Object.entries({ ...process.env, EAGLEGAZE_BRIDGE_MOCK: "1", EAGLEGAZE_ENABLE_EVALUATION: "0" }).filter(
     (entry): entry is [string, string] => typeof entry[1] === "string",
   ),
 );
@@ -49,6 +49,10 @@ try {
   if (JSON.stringify(manifestNames) !== JSON.stringify(serverNames)) {
     throw new Error(`Tool drift: manifest=${manifestNames.join(",")} server=${serverNames.join(",")}`);
   }
+  const expectedNames = ["capture_gaze", "get_gaze_status", "recalibrate_eagleeye", "start_gaze_evaluation"];
+  if (JSON.stringify(serverNames) !== JSON.stringify(expectedNames)) {
+    throw new Error(`Unexpected public API surface: ${serverNames.join(",")}`);
+  }
 
   for (const tool of manifest.tools) {
     const fixture = preview.tools[tool.name];
@@ -64,17 +68,36 @@ try {
     );
     if (!text) throw new Error(`${tool.name} returned no model-facing text.`);
     const payload = JSON.parse(text.text);
-    for (const field of ["sourceKind", "connectionState", "calibrationState", "evaluationState"]) {
-      if (typeof payload[field] !== "string") {
-        throw new Error(`${tool.name} omitted coarse ${field} state.`);
+    if (fixture.expectedErrorCode) {
+      if (!(result as { isError?: unknown }).isError || payload.code !== fixture.expectedErrorCode) {
+        throw new Error(`${tool.name} did not return structured ${fixture.expectedErrorCode}.`);
       }
-    }
-    const blocks = payload._voiceos_glance?.blocks;
-    if (!Array.isArray(blocks) || blocks.length !== fixture.expectedGlanceBlocks) {
-      throw new Error(`${tool.name} returned the wrong glance block count.`);
-    }
-    if ("lookAt" in payload || "mappedGaze" in payload || "faceTransform" in payload) {
-      throw new Error(`${tool.name} leaked gaze or face-derived fields into VoiceOS.`);
+    } else if (fixture.expectedCoordinateSpace) {
+      const image = content.find(
+        (item: unknown): item is { type: "image"; data: string; mimeType: string } =>
+          typeof item === "object" && item !== null &&
+          (item as { type?: unknown }).type === "image" &&
+          typeof (item as { data?: unknown }).data === "string",
+      );
+      if (!image || image.mimeType !== "image/jpeg") {
+        throw new Error(`${tool.name} returned no JPEG MCP image content.`);
+      }
+      if (payload.coordinateSpace !== fixture.expectedCoordinateSpace || !payload.gaze) {
+        throw new Error(`${tool.name} omitted image-relative gaze coordinates.`);
+      }
+    } else {
+      for (const field of ["sourceKind", "connectionState", "calibrationState", "evaluationState"]) {
+        if (typeof payload[field] !== "string") {
+          throw new Error(`${tool.name} omitted coarse ${field} state.`);
+        }
+      }
+      const blocks = payload._voiceos_glance?.blocks;
+      if (!Array.isArray(blocks) || blocks.length !== fixture.expectedGlanceBlocks) {
+        throw new Error(`${tool.name} returned the wrong glance block count.`);
+      }
+      if ("lookAt" in payload || "mappedGaze" in payload || "faceTransform" in payload) {
+        throw new Error(`${tool.name} leaked gaze or face-derived fields into VoiceOS.`);
+      }
     }
   }
 } finally {

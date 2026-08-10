@@ -25,7 +25,7 @@ final class PhoneLifecycleCoordinator {
     private(set) var isRunning = false
     private(set) var streamSessionID: UUID?
     /// Set when the presentation temporarily owns the camera (for example a
-    /// QR scanner sheet).  The coordinator intentionally does not resume by
+    /// another temporary interruption). The coordinator intentionally does not resume by
     /// itself: the app must obtain fresh authenticated session material first.
     private(set) var wantsResumeAfterPresentation = false
 
@@ -42,7 +42,16 @@ final class PhoneLifecycleCoordinator {
     }
 
     func start(sessionID: UUID = UUID()) {
-        guard !isRunning else { return }
+        if isRunning {
+            guard streamSessionID != sessionID else { return }
+            // A fresh authenticated session owns a fresh camera/pipeline
+            // generation. Never leave ARKit producing frames for an obsolete
+            // encryption session.
+            pipeline.stop()
+            tracker.stop()
+            isRunning = false
+            streamSessionID = nil
+        }
         sender.start()
         let trackingGeneration = tracker.start()
         _ = pipeline.start(sessionID: sessionID, generation: trackingGeneration)
@@ -50,6 +59,18 @@ final class PhoneLifecycleCoordinator {
         isRunning = true
         idleTimer.setIdleTimerDisabled(true)
         wantsResumeAfterPresentation = false
+    }
+
+    /// Stops frame production while a replacement authenticated session is
+    /// negotiated, without tearing down receiver discovery. This collapses
+    /// camera and transport rollover into one atomic transition.
+    func prepareForSessionReplacement() {
+        guard isRunning else { return }
+        pipeline.stop()
+        tracker.stop()
+        isRunning = false
+        streamSessionID = nil
+        idleTimer.setIdleTimerDisabled(false)
     }
 
     func stop() {

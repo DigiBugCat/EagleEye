@@ -1,6 +1,9 @@
 import ARKit
 import Foundation
+import OSLog
 import simd
+
+private let faceTrackingLog = Logger(subsystem: "com.aviary.EagleGazePhone", category: "face-tracking")
 
 struct FaceCapture: Sendable {
     let captureUptime: TimeInterval
@@ -33,6 +36,8 @@ final class FaceTrackingService: NSObject, ObservableObject {
     private let delegateQueue = DispatchQueue(label: "com.eaglegaze.phone.arkit")
     nonisolated private let generationStore = FaceTrackingGenerationStore()
     private var isRunning = false
+    private var hasReceivedCapture = false
+    private var startupWatchdog: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -44,6 +49,7 @@ final class FaceTrackingService: NSObject, ObservableObject {
     func start() -> UInt64 {
         guard !isRunning else { return generationStore.current }
         guard ARFaceTrackingConfiguration.isSupported else {
+            faceTrackingLog.error("ARKit face tracking unsupported on this device")
             status = "This iPhone does not support ARKit face tracking"
             isTracking = false
             return generationStore.current
@@ -51,25 +57,43 @@ final class FaceTrackingService: NSObject, ObservableObject {
 
         let generation = generationStore.advance()
         isRunning = true
+        hasReceivedCapture = false
+        startupWatchdog?.cancel()
         status = "Starting TrueDepth face tracking…"
         let configuration = ARFaceTrackingConfiguration()
         configuration.isLightEstimationEnabled = false
         session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        faceTrackingLog.notice("TrueDepth face tracking started generation=\(generation, privacy: .public)")
+        startupWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, self.isRunning, !self.hasReceivedCapture else { return }
+            self.status = "Move your face into view of the TrueDepth camera"
+            faceTrackingLog.warning("TrueDepth started but no face anchor arrived within four seconds")
+        }
         return generation
     }
 
     func stop() {
         // Invalidate queued delegate work even if ARKit is already paused.
         generationStore.advance()
+        startupWatchdog?.cancel()
+        startupWatchdog = nil
         guard isRunning else { return }
         isRunning = false
         session.pause()
         isTracking = false
         status = "Face tracking is paused while the app is not active"
+        faceTrackingLog.info("TrueDepth face tracking stopped")
     }
 
     private func receive(_ event: FaceCaptureEvent) {
         guard isRunning, event.generation == generationStore.current else { return }
+        if !hasReceivedCapture {
+            hasReceivedCapture = true
+            startupWatchdog?.cancel()
+            startupWatchdog = nil
+            faceTrackingLog.notice("First TrueDepth face anchor received tracked=\(event.capture.isTracked, privacy: .public)")
+        }
         let capture = event.capture
         isTracking = capture.isTracked
         status = capture.isTracked ? "Face and eyes are tracking" : "Face found; eye tracking is limited"
@@ -101,6 +125,16 @@ extension FaceTrackingService: ARSessionDelegate {
         }
     }
 
+    nonisolated func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        let state: String
+        switch camera.trackingState {
+        case .normal: state = "normal"
+        case .notAvailable: state = "not-available"
+        case .limited(let reason): state = "limited-\(String(describing: reason))"
+        }
+        faceTrackingLog.info("ARKit camera tracking state=\(state, privacy: .public)")
+    }
+
     nonisolated func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
         guard anchors.contains(where: { $0 is ARFaceAnchor }) else { return }
         Task { @MainActor [weak self] in
@@ -112,6 +146,7 @@ extension FaceTrackingService: ARSessionDelegate {
 
     nonisolated func session(_ session: ARSession, didFailWithError error: Error) {
         let message = error.localizedDescription
+        faceTrackingLog.error("ARKit session failed error=\(message, privacy: .public)")
         Task { @MainActor [weak self] in
             self?.isTracking = false
             self?.status = "ARKit error: \(message)"
@@ -119,6 +154,7 @@ extension FaceTrackingService: ARSessionDelegate {
     }
 
     nonisolated func sessionWasInterrupted(_ session: ARSession) {
+        faceTrackingLog.warning("ARKit session interrupted")
         Task { @MainActor [weak self] in
             self?.isTracking = false
             self?.status = "Face tracking was interrupted"
@@ -126,6 +162,7 @@ extension FaceTrackingService: ARSessionDelegate {
     }
 
     nonisolated func sessionInterruptionEnded(_ session: ARSession) {
+        faceTrackingLog.notice("ARKit interruption ended; restarting tracking")
         Task { @MainActor [weak self] in
             guard let self, self.isRunning else { return }
             let configuration = ARFaceTrackingConfiguration()

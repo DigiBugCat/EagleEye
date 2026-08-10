@@ -2,6 +2,7 @@
 @preconcurrency import Network
 import Foundation
 import GazeCore
+import OSLog
 
 private final class PairingContinuationGate<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
@@ -44,6 +45,7 @@ private final class PairingContinuationGate<Value: Sendable>: @unchecked Sendabl
 /// remain private to this adapter; callers select by the stable candidate ID
 /// and authenticated receiver identity, never by browser result order.
 public final class NetworkPairingControlTransport: PairingControlTransport, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.aviary.EagleGazePhone", category: "pairing-network")
     private let queue = DispatchQueue(label: "com.aviary.eaglegaze.phone.pairing-control")
     private let lock = NSLock()
     private var endpoints: [String: NWEndpoint] = [:]
@@ -51,6 +53,7 @@ public final class NetworkPairingControlTransport: PairingControlTransport, @unc
     public init() {}
 
     public func browse(timeout: Duration) async throws -> [PairingControlCandidate] {
+        Self.logger.debug("Bonjour browse starting")
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = true
         let browser = NWBrowser(
@@ -68,19 +71,26 @@ public final class NetworkPairingControlTransport: PairingControlTransport, @unc
                         for result in results {
                             let id = Self.candidateID(for: result.endpoint)
                             self?.endpoints[id] = result.endpoint
-                            // Bonjour instance names may be auto-suffixed on
-                            // collision; they are routing labels, not an
-                            // authenticated service identity. The client
-                            // binds identity only after the signed response.
-                            values.append(PairingControlCandidate(id: id, serviceIdentity: nil))
+                            let name: String
+                            if case let .service(serviceName, _, _, _) = result.endpoint {
+                                name = serviceName
+                            } else {
+                                name = "Nearby Mac"
+                            }
+                            // Bonjour names are only user-facing routing
+                            // labels. The transcript code authenticates the
+                            // selected endpoint after connection.
+                            values.append(PairingControlCandidate(id: id, displayName: name))
                         }
                         self?.lock.unlock()
                         browser.cancel()
+                        Self.logger.debug("Bonjour browse returned count=\(values.count, privacy: .public)")
                         gate.succeed(values)
                     }
                     browser.stateUpdateHandler = { state in
                         switch state {
                         case .failed(let error):
+                            Self.logger.error("Bonjour browse failed error=\(error.localizedDescription, privacy: .public)")
                             gate.fail(PairingControlClientError.transport(error.localizedDescription))
                         case .cancelled:
                             gate.fail(CancellationError())
@@ -101,6 +111,7 @@ public final class NetworkPairingControlTransport: PairingControlTransport, @unc
     }
 
     public func connect(to candidate: PairingControlCandidate, timeout: Duration) async throws -> PairingControlChannel {
+        Self.logger.debug("Control connection starting candidate=\(candidate.displayName, privacy: .public)")
         let endpoint = endpoint(for: candidate.id)
         guard let endpoint else { throw PairingControlClientError.noMatchingReceiver }
         let connection = NWConnection(to: endpoint, using: .tcp)
@@ -111,8 +122,12 @@ public final class NetworkPairingControlTransport: PairingControlTransport, @unc
                     gate.install(continuation)
                     connection.stateUpdateHandler = { state in
                         switch state {
-                        case .ready: gate.succeed(())
-                        case .failed(let error): gate.fail(PairingControlClientError.transport(error.localizedDescription))
+                        case .ready:
+                            Self.logger.debug("Control connection ready candidate=\(candidate.displayName, privacy: .public)")
+                            gate.succeed(())
+                        case .failed(let error):
+                            Self.logger.error("Control connection failed candidate=\(candidate.displayName, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                            gate.fail(PairingControlClientError.transport(error.localizedDescription))
                         case .cancelled: gate.fail(PairingControlClientError.transport("connection cancelled"))
                         default: break
                         }

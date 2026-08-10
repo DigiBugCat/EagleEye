@@ -127,4 +127,97 @@ final class TransportTests: XCTestCase {
         }
         XCTAssertTrue(factory.connections.isEmpty)
     }
+
+    func testSavedReceiverReturnRequestsFreshAuthenticationWithoutLosingIdentity() async throws {
+        let browser = InMemoryGazeReceiverBrowser()
+        let factory = InMemoryGazeDatagramConnectionFactory()
+        let coordinator = GazeTransportCoordinator(browser: browser, factory: factory)
+        let initial = DiscoveredGazeReceiver(
+            id: GazeReceiverID(rawValue: "saved-mac"),
+            displayName: "Saved Mac",
+            endpoint: .host(name: "saved-mac.local", port: 1001),
+            receiverFingerprint: "sha256:saved-mac"
+        )
+        let session = try GazeSessionMaterial(
+            pairID: UUID(),
+            sessionID: UUID(),
+            sessionKey: Data(repeating: 0x33, count: PairingProtocol.keyLength),
+            noncePrefix: Data(repeating: 0x44, count: PairingProtocol.noncePrefixLength)
+        )
+
+        coordinator.start()
+        browser.emit([initial])
+        await Task.yield()
+        await Task.yield()
+        try coordinator.selectReceiver(
+            id: initial.id,
+            receiverFingerprint: initial.receiverFingerprint,
+            session: session
+        )
+
+        browser.emit([])
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(coordinator.state, .waiting("Selected Mac is unavailable"))
+        XCTAssertEqual(coordinator.selectedReceiver?.receiverFingerprint, initial.receiverFingerprint)
+
+        let returned = DiscoveredGazeReceiver(
+            id: initial.id,
+            displayName: initial.displayName,
+            endpoint: .host(name: "saved-mac.local", port: 2002),
+            receiverFingerprint: initial.receiverFingerprint
+        )
+        browser.emit([returned])
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(coordinator.state, .failed("Selected Mac returned; refreshing authentication"))
+        XCTAssertEqual(coordinator.selectedReceiver?.receiverFingerprint, initial.receiverFingerprint)
+        XCTAssertEqual(coordinator.selectedReceiver?.endpoint, returned.endpoint)
+    }
+
+    func testSavedReceiverReturnWithDifferentIdentityFailsClosed() async throws {
+        let browser = InMemoryGazeReceiverBrowser()
+        let factory = InMemoryGazeDatagramConnectionFactory()
+        let coordinator = GazeTransportCoordinator(browser: browser, factory: factory)
+        let receiver = DiscoveredGazeReceiver(
+            id: GazeReceiverID(rawValue: "saved-mac"),
+            displayName: "Saved Mac",
+            endpoint: .host(name: "saved-mac.local", port: 1001),
+            receiverFingerprint: "sha256:trusted"
+        )
+        let session = try GazeSessionMaterial(
+            pairID: UUID(),
+            sessionID: UUID(),
+            sessionKey: Data(repeating: 0x55, count: PairingProtocol.keyLength),
+            noncePrefix: Data(repeating: 0x66, count: PairingProtocol.noncePrefixLength)
+        )
+
+        coordinator.start()
+        browser.emit([receiver])
+        await Task.yield()
+        await Task.yield()
+        try coordinator.selectReceiver(
+            id: receiver.id,
+            receiverFingerprint: receiver.receiverFingerprint,
+            session: session
+        )
+        browser.emit([])
+        await Task.yield()
+        await Task.yield()
+        browser.emit([
+            DiscoveredGazeReceiver(
+                id: receiver.id,
+                displayName: receiver.displayName,
+                endpoint: .host(name: "saved-mac.local", port: 2002),
+                receiverFingerprint: "sha256:untrusted"
+            )
+        ])
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertNil(coordinator.selectedReceiver)
+        XCTAssertEqual(coordinator.lastError as? GazeTransportError, .receiverIdentityMismatch)
+        XCTAssertEqual(coordinator.state, .failed("Receiver identity changed; select it again"))
+    }
 }

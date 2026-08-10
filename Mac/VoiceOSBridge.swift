@@ -1,13 +1,14 @@
 import Foundation
 import Network
 import Combine
+import CryptoKit
 
 /// The application-facing surface used by the local VoiceOS bridge.
 ///
-/// This protocol is intentionally coarser than the gaze pipeline. An app
-/// composition root adapts its receiver/session to this service and keeps
-/// source IDs, user names, coordinates, rays, matrices, and blink values on
-/// the Mac side of the boundary.
+/// This protocol is intentionally narrower than the gaze pipeline. An app
+/// composition root keeps source IDs, user names, rays, matrices, blink
+/// values, and global coordinates on the Mac side. The sole exception is an
+/// approved capture, which carries coordinates relative to that image only.
 @MainActor
 protocol GazeApplicationService: AnyObject {
     var voiceOSSnapshot: GazeApplicationSnapshot { get }
@@ -15,6 +16,11 @@ protocol GazeApplicationService: AnyObject {
     func startCalibration() throws
     func resetCalibration() throws
     func startEvaluation() throws
+    func recalibrateEagleEye() throws
+    func captureGaze(
+        marker: GazeCaptureMarker,
+        cancellation: any GazeCaptureCancellationChecking
+    ) async throws -> GazeCaptureArtifact
 }
 
 enum GazeApplicationServiceError: LocalizedError, Equatable {
@@ -105,13 +111,15 @@ struct GazeApplicationSnapshot: Codable, Equatable, Sendable {
 
 /// A deliberately small, loopback-only control surface for local integrations.
 ///
-/// The bridge never returns ARKit transforms or gaze coordinates. VoiceOS can
-/// ask for coarse session state and trigger the same reversible actions that
-/// are available in the EagleGaze window.
+/// The bridge never returns ARKit transforms or global gaze coordinates.
+/// Protocol v2 can return one annotated image plus image-relative coordinates,
+/// but only after EagleGaze itself displays and approves that exact capture.
 @MainActor
 final class VoiceOSBridge: ObservableObject {
     nonisolated static let protocolVersion = 1
+    nonisolated static let toolProtocolVersion = 2
     static let port: NWEndpoint.Port = 47_474
+    private static let maximumConcurrentConnections = 8
 
     @Published private(set) var status = "Starting local bridge…"
     @Published private(set) var isListening = false
@@ -119,6 +127,7 @@ final class VoiceOSBridge: ObservableObject {
     private let service: any GazeApplicationService
     private let queue = DispatchQueue(label: "com.digibugcat.eaglegaze.voiceos-bridge")
     private var listener: NWListener?
+    private var activeConnectionCount = 0
 
     init(service: any GazeApplicationService) {
         self.service = service
@@ -185,15 +194,39 @@ final class VoiceOSBridge: ObservableObject {
     }
 
     private func accept(_ connection: NWConnection) {
-        let reader = VoiceOSLineReader(connection: connection) { [weak self] line, connection in
-            Task { @MainActor in
-                self?.handle(line, on: connection)
-            }
+        guard activeConnectionCount < Self.maximumConcurrentConnections else {
+            connection.cancel()
+            return
         }
+        activeConnectionCount += 1
+        let reader = VoiceOSLineReader(
+            connection: connection,
+            handler: { [weak self] line, connection, cancellation in
+                Task { @MainActor in
+                    self?.handle(line, on: connection, cancellation: cancellation)
+                }
+            },
+            onFinished: { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.activeConnectionCount = max(0, self.activeConnectionCount - 1)
+                }
+            }
+        )
         reader.start(on: queue)
     }
 
-    private func handle(_ line: Data, on connection: NWConnection) {
+    private func handle(
+        _ line: Data,
+        on connection: NWConnection,
+        cancellation: BridgeConnectionCancellation
+    ) {
+        if (try? JSONDecoder().decode(BridgeVersion.self, from: line).version) == Self.toolProtocolVersion {
+            Task { @MainActor [weak self] in
+                await self?.handleV2(line, on: connection, cancellation: cancellation)
+            }
+            return
+        }
         let response: BridgeResponse
         do {
             let request = try JSONDecoder().decode(BridgeRequest.self, from: line)
@@ -216,6 +249,140 @@ final class VoiceOSBridge: ObservableObject {
         } catch {
             connection.cancel()
         }
+    }
+
+    private func handleV2(
+        _ line: Data,
+        on connection: NWConnection,
+        cancellation: BridgeConnectionCancellation
+    ) async {
+        let response: ToolBridgeResponse
+        var body: Data?
+        do {
+            let request = try JSONDecoder().decode(ToolBridgeRequest.self, from: line)
+            guard request.version == Self.toolProtocolVersion else {
+                throw ToolBridgeFailure(code: "unsupported_version", message: "EagleGaze tool protocol v2 is required.", retryable: false)
+            }
+            guard UUID(uuidString: request.requestID) != nil else {
+                throw ToolBridgeFailure(code: "invalid_request", message: "requestID must be a UUID.", retryable: false)
+            }
+            guard request.method == "tools/call" else {
+                throw ToolBridgeFailure(code: "unknown_method", message: "Only tools/call is supported.", retryable: false)
+            }
+            switch request.params.name {
+            case "recalibrate_eagleeye":
+                try service.recalibrateEagleEye()
+                response = ToolBridgeResponse.success(
+                    requestID: request.requestID,
+                    result: ToolResult(snapshot: snapshot())
+                )
+            case "start_gaze_evaluation":
+                try service.startEvaluation()
+                response = ToolBridgeResponse.success(
+                    requestID: request.requestID,
+                    result: ToolResult(snapshot: snapshot())
+                )
+            case "capture_gaze":
+                let marker = try request.params.arguments?.decodedMarker() ?? .circle
+                let artifact = try await service.captureGaze(marker: marker, cancellation: cancellation)
+                guard artifact.jpeg.count <= GazeCaptureService.maximumBodyBytes else {
+                    throw GazeCaptureError.responseTooLarge
+                }
+                let digest = SHA256.hash(data: artifact.jpeg).map { String(format: "%02x", $0) }.joined()
+                body = artifact.jpeg
+                response = ToolBridgeResponse.success(
+                    requestID: request.requestID,
+                    bodyLength: artifact.jpeg.count,
+                    result: ToolResult(
+                        kind: "image",
+                        mimeType: "image/jpeg",
+                        width: artifact.width,
+                        height: artifact.height,
+                        sha256: digest,
+                        marker: artifact.marker.rawValue,
+                        capturedAt: Self.timestampFormatter.string(from: artifact.capturedAt),
+                        target: "calibrated_display",
+                        scope: "context_region",
+                        gaze: ToolGazeResult(
+                            x: artifact.gazeX,
+                            y: artifact.gazeY,
+                            normalizedX: artifact.normalizedX,
+                            normalizedY: artifact.normalizedY,
+                            uncertaintyRadius: artifact.uncertaintyRadius
+                        ),
+                        region: ToolRegionResult(
+                            kind: artifact.region.kind.rawValue,
+                            resolvedBy: artifact.region.resolvedBy.rawValue,
+                            confidence: artifact.region.confidence,
+                            fallbackUsed: artifact.region.fallbackUsed,
+                            topmostAtGaze: artifact.region.topmostAtGaze,
+                            includedRelationships: artifact.region.includedRelationships
+                        ),
+                        enrichment: artifact.enrichment.map {
+                            ToolEnrichmentResult(
+                                provenance: "external_provider",
+                                trust: "untrusted_advisory",
+                                provider: "cerebras",
+                                model: "gemma-4-31b",
+                                contentType: $0.contentType,
+                                regionSummary: $0.regionSummary,
+                                focusedSubject: $0.focusedSubject,
+                                focusedText: $0.focusedText,
+                                contextSufficient: $0.contextSufficient,
+                                labels: $0.labels,
+                                confidence: $0.providerConfidence,
+                                warnings: $0.warnings
+                            )
+                        },
+                        enrichmentWarning: artifact.enrichmentWarning
+                    )
+                )
+            default:
+                throw ToolBridgeFailure(code: "unknown_tool", message: "That EagleGaze tool is not supported.", retryable: false)
+            }
+        } catch let error as ToolBridgeFailure {
+            response = .failure(requestID: Self.requestID(from: line), error: error)
+        } catch let error as GazeApplicationServiceError {
+            response = .failure(
+                requestID: Self.requestID(from: line),
+                error: ToolBridgeFailure(code: error.code, message: error.localizedDescription, retryable: error != .unavailable)
+            )
+        } catch let error as GazeCaptureError {
+            response = .failure(requestID: Self.requestID(from: line), error: error.bridgeFailure)
+        } catch DecodingError.dataCorrupted {
+            response = .failure(
+                requestID: Self.requestID(from: line),
+                error: ToolBridgeFailure(code: "invalid_arguments", message: "Tool arguments are invalid.", retryable: false)
+            )
+        } catch {
+            response = .failure(
+                requestID: Self.requestID(from: line),
+                error: ToolBridgeFailure(code: "invalid_request", message: "Request was not valid protocol v2 JSON.", retryable: false)
+            )
+        }
+        send(response, body: body, on: connection)
+    }
+
+    private func send(_ response: ToolBridgeResponse, body: Data?, on connection: NWConnection) {
+        do {
+            var framed = try JSONEncoder().encode(response)
+            guard framed.count <= 65_536 else { throw GazeCaptureError.responseTooLarge }
+            framed.append(0x0A)
+            if let body { framed.append(body) }
+            connection.send(content: framed, completion: .contentProcessed { _ in connection.cancel() })
+        } catch {
+            connection.cancel()
+        }
+    }
+
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private nonisolated static func requestID(from data: Data) -> String? {
+        try? JSONDecoder().decode(BridgeRequestID.self, from: data).requestID
     }
 
     private func process(_ request: BridgeRequest) -> BridgeResponse {
@@ -295,6 +462,156 @@ private final class UnconfiguredGazeApplicationService: GazeApplicationService {
     func startCalibration() throws { throw GazeApplicationServiceError.unavailable }
     func resetCalibration() throws { throw GazeApplicationServiceError.unavailable }
     func startEvaluation() throws { throw GazeApplicationServiceError.unavailable }
+    func recalibrateEagleEye() throws { throw GazeApplicationServiceError.unavailable }
+    func captureGaze(marker: GazeCaptureMarker, cancellation: any GazeCaptureCancellationChecking) async throws -> GazeCaptureArtifact {
+        throw GazeApplicationServiceError.unavailable
+    }
+}
+
+private struct BridgeVersion: Decodable { let version: Int }
+private struct BridgeRequestID: Decodable { let requestID: String }
+
+private struct ToolBridgeRequest: Decodable {
+    let version: Int
+    let requestID: String
+    let method: String
+    let params: ToolCallParams
+}
+
+private struct ToolCallParams: Decodable {
+    let name: String
+    let arguments: ToolArguments?
+}
+
+private struct ToolArguments: Decodable {
+    let marker: String?
+
+    func decodedMarker() throws -> GazeCaptureMarker {
+        guard let marker else { return .circle }
+        guard let value = GazeCaptureMarker(rawValue: marker) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Unsupported marker"))
+        }
+        return value
+    }
+}
+
+private struct ToolBridgeResponse: Encodable {
+    let version: Int
+    let requestID: String?
+    let ok: Bool
+    let bodyLength: Int
+    let result: ToolResult?
+    let error: ToolBridgeErrorPayload?
+
+    static func success(requestID: String, bodyLength: Int = 0, result: ToolResult) -> Self {
+        Self(version: VoiceOSBridge.toolProtocolVersion, requestID: requestID, ok: true, bodyLength: bodyLength, result: result, error: nil)
+    }
+
+    static func failure(requestID: String?, error: ToolBridgeFailure) -> Self {
+        Self(
+            version: VoiceOSBridge.toolProtocolVersion,
+            requestID: requestID,
+            ok: false,
+            bodyLength: 0,
+            result: nil,
+            error: ToolBridgeErrorPayload(code: error.code, message: error.message, retryable: error.retryable)
+        )
+    }
+}
+
+private struct ToolResult: Encodable {
+    let snapshot: BridgeSnapshot?
+    let kind: String?
+    let mimeType: String?
+    let width: Int?
+    let height: Int?
+    let sha256: String?
+    let marker: String?
+    let capturedAt: String?
+    let target: String?
+    let scope: String?
+    let gaze: ToolGazeResult?
+    let region: ToolRegionResult?
+    let enrichment: ToolEnrichmentResult?
+    let enrichmentWarning: String?
+
+    init(snapshot: BridgeSnapshot? = nil, kind: String? = nil, mimeType: String? = nil, width: Int? = nil, height: Int? = nil, sha256: String? = nil, marker: String? = nil, capturedAt: String? = nil, target: String? = nil, scope: String? = nil, gaze: ToolGazeResult? = nil, region: ToolRegionResult? = nil, enrichment: ToolEnrichmentResult? = nil, enrichmentWarning: String? = nil) {
+        self.snapshot = snapshot
+        self.kind = kind
+        self.mimeType = mimeType
+        self.width = width
+        self.height = height
+        self.sha256 = sha256
+        self.marker = marker
+        self.capturedAt = capturedAt
+        self.target = target
+        self.scope = scope
+        self.gaze = gaze
+        self.region = region
+        self.enrichment = enrichment
+        self.enrichmentWarning = enrichmentWarning
+    }
+}
+
+private struct ToolRegionResult: Encodable {
+    let kind: String
+    let resolvedBy: String
+    let confidence: Double
+    let fallbackUsed: Bool
+    let topmostAtGaze: Bool?
+    let includedRelationships: [String]
+}
+
+private struct ToolEnrichmentResult: Encodable {
+    let provenance: String
+    let trust: String
+    let provider: String
+    let model: String
+    let contentType: String
+    let regionSummary: String
+    let focusedSubject: String
+    let focusedText: String
+    let contextSufficient: Bool
+    let labels: [String]
+    let confidence: Double
+    let warnings: [String]
+}
+
+private struct ToolGazeResult: Encodable {
+    let x: Int
+    let y: Int
+    let normalizedX: Double
+    let normalizedY: Double
+    let uncertaintyRadius: Int
+}
+
+private struct ToolBridgeErrorPayload: Encodable {
+    let code: String
+    let message: String
+    let retryable: Bool
+}
+
+private struct ToolBridgeFailure: Error {
+    let code: String
+    let message: String
+    let retryable: Bool
+}
+
+private extension GazeCaptureError {
+    var bridgeFailure: ToolBridgeFailure {
+        switch self {
+        case .captureBusy: .init(code: "capture_busy", message: localizedDescription, retryable: true)
+        case .gazeStale: .init(code: "gaze_stale", message: localizedDescription, retryable: true)
+        case .notCalibrated: .init(code: "not_calibrated", message: localizedDescription, retryable: true)
+        case .displayUnavailable: .init(code: "display_unavailable", message: localizedDescription, retryable: true)
+        case .permissionRequired: .init(code: "screen_recording_permission_required", message: localizedDescription, retryable: true)
+        case .approvalRejected: .init(code: "approval_rejected", message: localizedDescription, retryable: false)
+        case .captureFailed: .init(code: "capture_failed", message: localizedDescription, retryable: true)
+        case .encodingFailed: .init(code: "encoding_failed", message: localizedDescription, retryable: true)
+        case .responseTooLarge: .init(code: "response_too_large", message: localizedDescription, retryable: true)
+        case .requestCancelled: .init(code: "request_cancelled", message: localizedDescription, retryable: false)
+        }
+    }
 }
 
 private struct BridgeRequest: Decodable {
@@ -380,19 +697,46 @@ private struct BridgeSnapshot: Encodable {
 /// the main-actor bridge. All mutation stays on the bridge's serial queue.
 private final class VoiceOSLineReader: @unchecked Sendable {
     private static let maximumRequestBytes = 16_384
+    private static let requestDeadline: TimeInterval = 5
 
     private let connection: NWConnection
-    private let handler: @Sendable (Data, NWConnection) -> Void
+    private let handler: @Sendable (Data, NWConnection, BridgeConnectionCancellation) -> Void
+    private let cancellation = BridgeConnectionCancellation()
+    private let onFinished: @Sendable () -> Void
     private var buffer = Data()
     private var finished = false
+    private var closed = false
+    private var deadlineWorkItem: DispatchWorkItem?
 
-    init(connection: NWConnection, handler: @escaping @Sendable (Data, NWConnection) -> Void) {
+    init(
+        connection: NWConnection,
+        handler: @escaping @Sendable (Data, NWConnection, BridgeConnectionCancellation) -> Void,
+        onFinished: @escaping @Sendable () -> Void
+    ) {
         self.connection = connection
         self.handler = handler
+        self.onFinished = onFinished
     }
 
     func start(on queue: DispatchQueue) {
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .failed, .cancelled:
+                cancellation.cancel()
+                completeConnection()
+            default: break
+            }
+        }
         connection.start(queue: queue)
+        let deadline = DispatchWorkItem { [weak self] in
+            guard let self, !finished else { return }
+            cancellation.cancel()
+            connection.cancel()
+            completeConnection()
+        }
+        deadlineWorkItem = deadline
+        queue.asyncAfter(deadline: .now() + Self.requestDeadline, execute: deadline)
         receiveNext()
     }
 
@@ -405,22 +749,81 @@ private final class VoiceOSLineReader: @unchecked Sendable {
 
             if buffer.count > Self.maximumRequestBytes {
                 finished = true
+                deadlineWorkItem?.cancel()
                 connection.cancel()
+                completeConnection()
                 return
             }
 
             if let newline = buffer.firstIndex(of: 0x0A) {
                 finished = true
-                handler(Data(buffer[..<newline]), connection)
+                deadlineWorkItem?.cancel()
+                let trailingStart = buffer.index(after: newline)
+                guard trailingStart == buffer.endIndex else {
+                    cancellation.cancel()
+                    connection.cancel()
+                    completeConnection()
+                    return
+                }
+                if isComplete || error != nil {
+                    cancellation.cancel()
+                }
+                handler(Data(buffer[..<newline]), connection, cancellation)
+                if !cancellation.isCancelled { monitorDisconnect() }
                 return
             }
 
             if isComplete || error != nil {
                 finished = true
+                deadlineWorkItem?.cancel()
                 connection.cancel()
+                completeConnection()
                 return
             }
             receiveNext()
         }
+    }
+
+    private func monitorDisconnect() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [self] data, _, isComplete, error in
+            if isComplete || error != nil {
+                cancellation.cancel()
+                completeConnection()
+                return
+            }
+            // Requests are one-shot. Any bytes after the newline are invalid;
+            // treat them as cancellation rather than retaining capture state.
+            if data?.isEmpty == false {
+                cancellation.cancel()
+                connection.cancel()
+                completeConnection()
+                return
+            }
+            monitorDisconnect()
+        }
+    }
+
+    private func completeConnection() {
+        guard !closed else { return }
+        closed = true
+        deadlineWorkItem?.cancel()
+        onFinished()
+    }
+}
+
+final class BridgeConnectionCancellation: GazeCaptureCancellationChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
     }
 }

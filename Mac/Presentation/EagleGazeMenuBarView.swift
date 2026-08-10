@@ -21,7 +21,7 @@ enum EagleGazeMenuBarStatus: Equatable {
     ) -> Self {
         guard hasSource else { return .needsPhone }
         guard isFresh else { return .waiting }
-        if phase == .calibrating { return .calibrating }
+        if phase == .calibrating || phase == .validating || phase == .recentering { return .calibrating }
         if phase == .evaluating { return .evaluating }
         return hasProfile ? .ready : .connected
     }
@@ -62,9 +62,7 @@ enum EagleGazeMenuBarStatus: Equatable {
     var tint: Color {
         switch self {
         case .needsPhone, .waiting: .orange
-        case .connected: .blue
-        case .calibrating: .teal
-        case .evaluating: .purple
+        case .connected, .calibrating, .evaluating: .blue
         case .ready: .green
         }
     }
@@ -77,7 +75,7 @@ struct EagleGazeMenuBarView: View {
 
     private var status: EagleGazeMenuBarStatus {
         .resolve(
-            hasSource: application.activeSource != nil,
+            hasSource: application.hasAuthenticatedPhoneSession,
             isFresh: application.isFresh,
             phase: application.snapshot.phase,
             hasProfile: application.snapshot.profile != nil
@@ -87,13 +85,20 @@ struct EagleGazeMenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                Image(systemName: status.symbolName)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(status.tint)
-                    .frame(width: 34)
-                    .accessibilityHidden(true)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.blue.opacity(0.12))
+                    Image(systemName: status.symbolName)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+                }
+                .frame(width: 42, height: 42)
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(status.title).font(.headline)
+                    HStack(spacing: 6) {
+                        Text(status.title).font(.headline)
+                        liveStatusDot
+                    }
                     Text(status.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -108,6 +113,10 @@ struct EagleGazeMenuBarView: View {
                 Label(application.selectedDisplay?.name ?? "No display selected", systemImage: "display")
                 Label(calibrationSummary, systemImage: application.snapshot.profile == nil ? "scope" : "checkmark.seal.fill")
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.07), lineWidth: 1) }
             .font(.callout)
             .foregroundStyle(.secondary)
 
@@ -136,6 +145,7 @@ struct EagleGazeMenuBarView: View {
         }
         .padding(16)
         .frame(width: 330)
+        .tint(Color.blue)
         .onAppear { overlayController.show(application: application) }
         .onChange(of: application.mappedPoint) { _, _ in overlayController.update(application: application) }
         .onChange(of: application.showsGazeOverlay) { _, _ in overlayController.update(application: application) }
@@ -149,7 +159,7 @@ struct EagleGazeMenuBarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Approve \(pending.displayName)?")
                     .font(.headline)
-                Text("Verification code \(pending.verificationCode)")
+                Text("Code \(formattedVerificationCode(pending.verificationCode))")
                     .font(.body.monospaced().weight(.semibold))
                 HStack {
                     Button("Approve") { application.confirmPairing() }
@@ -159,10 +169,20 @@ struct EagleGazeMenuBarView: View {
                 }
             }
         default:
-            HStack {
-                if application.activeSource == nil {
+            if isTargetPhase {
+                VStack(alignment: .leading, spacing: 7) {
+                    ProgressView(value: application.snapshot.targetProgress)
+                        .tint(.teal)
+                    Text(calibrationSummary)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Button("Open calibration window…") { showMainWindow() }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else {
+                HStack {
+                    if !application.hasAuthenticatedPhoneSession {
                     Button("Pair iPhone…") {
-                        application.beginPairingOffer()
                         showMainWindow()
                     }
                     .buttonStyle(.borderedProminent)
@@ -175,10 +195,17 @@ struct EagleGazeMenuBarView: View {
                     Button("Start evaluation") { run { try application.startEvaluation() } }
                         .buttonStyle(.borderedProminent)
                         .disabled(!application.isFresh)
-                    Button("Reset…") { showMainWindow() }
+                    Button("Recalibrate") {
+                        run {
+                            try application.recalibrateEagleEye()
+                            showMainWindow()
+                        }
+                    }
                         .buttonStyle(.bordered)
+                        .disabled(!application.isFresh)
                 }
-                Spacer()
+                    Spacer()
+                }
             }
         }
     }
@@ -187,11 +214,37 @@ struct EagleGazeMenuBarView: View {
         switch application.snapshot.phase {
         case .idle: "Not calibrated"
         case .calibrating: "Point \(min(application.snapshot.targetIndex + 1, application.snapshot.targetCount)) of \(application.snapshot.targetCount)"
+        case .validating: "Validation \(min(application.snapshot.trialIndex + 1, application.snapshot.trialCount)) of \(application.snapshot.trialCount)"
+        case .recentering: "Recentering on the display center"
         case .calibrated: "Calibration saved"
         case .evaluating: "Trial \(min(application.snapshot.trialIndex + 1, application.snapshot.trialCount)) of \(application.snapshot.trialCount)"
         case .complete: "Evaluation: \(application.snapshot.evaluationHits) of \(application.snapshot.trialCount) hits"
         case .failed: "Calibration needs attention"
         }
+    }
+
+    private var isTargetPhase: Bool {
+        switch application.snapshot.phase {
+        case .calibrating, .validating, .recentering, .evaluating: true
+        case .idle, .calibrated, .complete, .failed: false
+        }
+    }
+
+    private var liveStatusDot: some View {
+        TimelineView(.animation(minimumInterval: 0.14, paused: !application.isFresh)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+            let pulse = (sin(phase * .pi * 2) + 1) / 2
+            ZStack {
+                if application.isFresh {
+                    Circle()
+                        .fill(Color.blue.opacity(0.18 * (1 - pulse)))
+                        .frame(width: 16, height: 16)
+                        .scaleEffect(0.8 + pulse * 0.4)
+                }
+                Circle().fill(status.tint).frame(width: 7, height: 7)
+            }
+        }
+        .frame(width: 16, height: 16)
     }
 
     private var overlayBinding: Binding<Bool> {
@@ -218,6 +271,11 @@ struct EagleGazeMenuBarView: View {
         do { try action() }
         catch { application.lastError = error.localizedDescription }
     }
+
+    private func formattedVerificationCode(_ code: String) -> String {
+        guard code.count == 6 else { return code }
+        return "\(code.prefix(3)) \(code.suffix(3))"
+    }
 }
 
 /// A small persistent window for people who prefer a visible corner status
@@ -230,7 +288,7 @@ struct EagleGazeCompactStatusView: View {
 
     private var status: EagleGazeMenuBarStatus {
         .resolve(
-            hasSource: application.activeSource != nil,
+            hasSource: application.hasAuthenticatedPhoneSession,
             isFresh: application.isFresh,
             phase: application.snapshot.phase,
             hasProfile: application.snapshot.profile != nil
@@ -240,10 +298,15 @@ struct EagleGazeCompactStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: status.symbolName)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(status.tint)
-                    .accessibilityHidden(true)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.blue.opacity(0.12))
+                    Image(systemName: status.symbolName)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+                }
+                .frame(width: 38, height: 38)
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("EagleGaze").font(.headline)
                     Text(status.title).font(.callout).foregroundStyle(.secondary)
@@ -268,6 +331,9 @@ struct EagleGazeCompactStatusView: View {
                 }
             ))
             .disabled(application.snapshot.profile == nil)
+            .padding(10)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.07), lineWidth: 1) }
 
             HStack {
                 Text(application.selectedDisplay?.name ?? "No display selected")
@@ -282,6 +348,7 @@ struct EagleGazeCompactStatusView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .tint(Color.blue)
         .onAppear { overlayController.show(application: application) }
         .onChange(of: application.mappedPoint) { _, _ in overlayController.update(application: application) }
         .onChange(of: application.snapshot) { _, _ in overlayController.update(application: application) }

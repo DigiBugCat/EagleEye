@@ -4,29 +4,47 @@ import GazeCore
 import Testing
 @testable import EagleGazePhone
 
-@Test func pairingClientAuthenticatesApprovalBeforePersisting() async throws {
+@Test func pairingClientErrorsHaveActionableDescriptions() {
+    #expect(PairingControlClientError.timeout.localizedDescription == "The Mac did not respond in time.")
+    #expect(PairingControlClientError.identityMismatch.localizedDescription.contains("no longer matches"))
+    #expect(PairingControlClientError.noMatchingReceiver.localizedDescription.contains("could not be authenticated"))
+}
+
+@Test @MainActor func nearbyPairingDiscoversOfferAndAuthenticatesApprovalBeforePersisting() async throws {
     let receiverKey = P256EphemeralKeyPair()
     let initiatorKey = P256EphemeralKeyPair()
+    let testNow = Date()
     let offer = try PairingOffer(
         offerID: UUID(),
         receiverFingerprint: "sha256:mac",
         ephemeralPublicKey: receiverKey.publicKey,
         oneTimeSecret: Data(repeating: 7, count: 32),
         serviceIdentity: "mac-identity",
-        expiresAt: Date(timeIntervalSinceReferenceDate: 500)
+        expiresAt: testNow.addingTimeInterval(500)
     )
     let identity = try PhoneDeviceIdentity(deviceID: UUID(), displayName: "iPhone")
     let identityStore = InMemoryPhoneDeviceIdentityStore(identity: identity)
     let receiverStore = InMemoryPairedReceiverStore()
-    let candidate = PairingControlCandidate(id: "mac", serviceIdentity: offer.serviceIdentity)
+    let candidate = PairingControlCandidate(id: "mac", displayName: "Andrew's Mac")
     let channel = InMemoryPairingControlChannel()
     let transport = InMemoryPairingControlTransport(candidates: [candidate], channels: [candidate.id: channel])
 
     channel.onSend = { frame in
         var decoder = PairingWireFrameDecoder()
         guard let payload = try? decoder.append(frame).first,
-              let message = try? PairingWireProtocol.decode(PairingControlMessage.self, payload: payload),
-              case let .qrRequest(request) = message,
+              let message = try? PairingWireProtocol.decode(PairingControlMessage.self, payload: payload) else {
+            return
+        }
+        if case let .nearbyOfferRequest(request) = message {
+            if let response = try? NearbyPairingOfferResponse(requestID: request.requestID, offer: offer),
+               let responseFrame = try? PairingWireProtocol.encode(
+                   PairingControlMessage.nearbyOfferResponse(response)
+               ) {
+                channel.enqueueRaw(responseFrame)
+            }
+            return
+        }
+        guard case let .pairingRequest(request) = message,
               let transcript = try? PairingTranscript(
                 offerID: offer.offerID,
                 receiverFingerprint: offer.receiverFingerprint,
@@ -68,11 +86,19 @@ import Testing
         identityStore: identityStore,
         receiverStore: receiverStore,
         transport: transport,
-        clock: { Date(timeIntervalSinceReferenceDate: 100) },
+        clock: { testNow },
         keyPairFactory: { initiatorKey },
         responseTimeout: .seconds(1)
     )
-    let paired = try await client.pair(offer: offer, displayName: "iPhone")
+    var presentedCode: String?
+    let discovered = try await client.discoverNearbyMacs()
+    #expect(discovered == [candidate])
+    let paired = try await client.pair(
+        candidate: candidate,
+        displayName: "iPhone",
+        onVerificationCode: { presentedCode = $0 }
+    )
+    #expect(presentedCode?.count == 6)
     #expect(paired.serviceIdentity == offer.serviceIdentity)
     #expect(try receiverStore.load().count == 1)
 }
@@ -103,7 +129,7 @@ import Testing
         var decoder = PairingWireFrameDecoder()
         guard let payload = try? decoder.append(frame).first,
               let message = try? PairingWireProtocol.decode(PairingControlMessage.self, payload: payload),
-              case let .qrRequest(request) = message,
+              case let .pairingRequest(request) = message,
               let transcript = try? PairingTranscript(
                 offerID: offer.offerID, receiverFingerprint: offer.receiverFingerprint,
                 serviceIdentity: offer.serviceIdentity, receiverEphemeralPublicKey: offer.ephemeralPublicKey,
@@ -132,8 +158,8 @@ import Testing
     wrong.onSend = { frame in respond(frame, on: wrong, receiverKey: wrongKey) }
     correct.onSend = { frame in respond(frame, on: correct, receiverKey: receiverKey, fragmented: true) }
 
-    let first = PairingControlCandidate(id: "a-collision", serviceIdentity: nil)
-    let second = PairingControlCandidate(id: "z-collision", serviceIdentity: nil)
+    let first = PairingControlCandidate(id: "a-collision", displayName: "Mac")
+    let second = PairingControlCandidate(id: "z-collision", displayName: "Mac")
     let transport = InMemoryPairingControlTransport(
         candidates: [second, first], channels: [first.id: wrong, second.id: correct]
     )

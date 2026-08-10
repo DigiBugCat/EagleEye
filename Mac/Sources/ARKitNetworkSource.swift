@@ -24,6 +24,10 @@ public enum GazeSourceIngestResult: Equatable, Sendable {
 public final class ARKitNetworkSource: GazeSource {
     nonisolated public static let receiverFingerprintTXTKey = "receiverFingerprint"
     nonisolated public static let maximumReceiverFingerprintBytes = 128
+    /// A stable application-owned port keeps a cached Bonjour service useful
+    /// across Mac process restarts. UDP can report a locally ready connection
+    /// even when a cached service still names the previous random port.
+    nonisolated public static let defaultPort = NWEndpoint.Port(rawValue: 47_475)!
 
     #if DEBUG
     nonisolated public static let debugReceiverFingerprint = "debug-eagle-gaze"
@@ -56,7 +60,7 @@ public final class ARKitNetworkSource: GazeSource {
         public var receiverFingerprint: String
 
         public init(
-            port: NWEndpoint.Port = .any,
+            port: NWEndpoint.Port = ARKitNetworkSource.defaultPort,
             maximumDatagramSize: Int = 16 * 1024,
             maximumPacketsPerSecond: Int = 240,
             freshnessTimeout: TimeInterval = 0.6,

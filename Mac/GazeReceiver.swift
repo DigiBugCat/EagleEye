@@ -1,6 +1,9 @@
 import Combine
 import Foundation
 import GazeCore
+import OSLog
+
+private let gazeReceiverLog = Logger(subsystem: "com.aviary.EagleGazeMac", category: "gaze-receiver")
 
 /// Compatibility façade for the original Mac UI.  New code should depend on
 /// GazeSourceManager and consume CanonicalGazeFrame values; this façade keeps
@@ -43,6 +46,7 @@ final class GazeReceiver: ObservableObject {
     @Published private(set) var rejectedPacketCount = 0
     @Published private(set) var decodeErrorCount = 0
     @Published private(set) var lastRejection: String?
+    private var hasLoggedFirstFrame = false
 
     private(set) var source: ARKitNetworkSource
     let sourceManager: GazeSourceManager
@@ -65,15 +69,19 @@ final class GazeReceiver: ObservableObject {
         sourceManager.eventHandler = { [weak self] event in self?.consume(event) }
         do {
             try sourceManager.register(source)
-            // This is the one explicit source selection performed by the
-            // application composition root. The manager never auto-switches.
-            try sourceManager.select(sourceID: source.descriptor.sourceID)
+            // Register the adapter so it appears in the source inventory, but
+            // do not start advertising a temporary DEBUG receiver identity.
+            // The authenticated pairing session installs and selects the only
+            // receiver identity that the phone is allowed to trust.
+            state = .waiting("Authenticate an iPhone to start gaze transport")
+            gazeReceiverLog.notice("Gaze receiver registered; awaiting authenticated iPhone session")
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
     func start() {
+        gazeReceiverLog.info("Gaze receiver starting")
         guard !source.isRunning else { return }
         do {
             if sourceManager.activeSourceID == nil {
@@ -83,11 +91,13 @@ final class GazeReceiver: ObservableObject {
                 try sourceManager.select(sourceID: source.descriptor.sourceID)
             }
         } catch {
+            gazeReceiverLog.error("Gaze receiver start failed error=\(error.localizedDescription, privacy: .public)")
             state = .failed(error.localizedDescription)
         }
     }
 
     func stop() {
+        gazeReceiverLog.info("Gaze receiver stopping")
         sourceManager.stopActive()
         latestSample = nil
         latestFrame = nil
@@ -113,6 +123,18 @@ final class GazeReceiver: ObservableObject {
     ) throws {
         guard sourceID.isValid else { throw ActivationError.invalidSourceID }
 
+        let fingerprint = receiverFingerprint ?? ARKitNetworkSource.debugReceiverFingerprint
+        if source.descriptor.sourceID == sourceID,
+           source.advertisedReceiverFingerprint == fingerprint {
+            clearPublishedGazeState()
+            source.update(secureSession: secureSession)
+            if sourceManager.activeSourceID == nil {
+                try sourceManager.select(sourceID: sourceID)
+            }
+            gazeReceiverLog.notice("Authenticated gaze session rotated without replacing receiver device=\(displayName, privacy: .public)")
+            return
+        }
+
         let oldID = source.descriptor.sourceID
         sourceManager.stopActive()
         if sourceManager.source(sourceID: oldID) != nil {
@@ -124,7 +146,7 @@ final class GazeReceiver: ObservableObject {
             displayName: displayName,
             configuration: .init(
                 secureSession: secureSession,
-                receiverFingerprint: receiverFingerprint ?? ARKitNetworkSource.debugReceiverFingerprint
+                receiverFingerprint: fingerprint
             )
         )
         #if DEBUG
@@ -136,6 +158,7 @@ final class GazeReceiver: ObservableObject {
         clearPublishedGazeState()
         try sourceManager.register(replacement)
         try sourceManager.select(sourceID: sourceID)
+        gazeReceiverLog.notice("Authenticated gaze source activated device=\(displayName, privacy: .public) secure=\(secureSession != nil, privacy: .public)")
     }
 
     private func consume(_ event: GazeSourceEvent) {
@@ -143,10 +166,15 @@ final class GazeReceiver: ObservableObject {
         rejectedPacketCount = source.rejectedPacketCount
         switch event {
         case .started:
+            gazeReceiverLog.notice("Gaze UDP receiver advertised port=\(self.source.listeningPort?.rawValue ?? 0, privacy: .public)")
             state = .advertising(port: source.listeningPort?.rawValue ?? 0)
         case .frame(let frame):
             latestFrame = frame
             isFresh = true
+            if !hasLoggedFirstFrame {
+                hasLoggedFirstFrame = true
+                gazeReceiverLog.notice("First authenticated gaze frame accepted session=\(frame.sourceSessionID.uuidString.prefix(8), privacy: .public) sequence=\(frame.sequence, privacy: .public)")
+            }
         case .freshnessChanged(let fresh):
             isFresh = fresh
         case .waiting(let detail):
@@ -154,6 +182,7 @@ final class GazeReceiver: ObservableObject {
         case .rejected(let reason):
             lastRejection = reason
             decodeErrorCount = source.rejectedPacketCount
+            gazeReceiverLog.error("Authenticated gaze datagram rejected reason=\(reason, privacy: .public)")
         case .failed(let detail):
             state = .failed(detail)
         case .stopped:
@@ -169,6 +198,7 @@ final class GazeReceiver: ObservableObject {
         rejectedPacketCount = 0
         decodeErrorCount = 0
         lastRejection = nil
+        hasLoggedFirstFrame = false
         state = .starting
     }
 }

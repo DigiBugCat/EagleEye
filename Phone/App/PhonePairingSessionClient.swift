@@ -7,10 +7,17 @@ import GazeCore
 /// fully authenticated value object after that work succeeds.
 @MainActor
 protocol PhonePairingSessionClient: AnyObject {
-    /// Completes the QR pairing transcript and returns a durable phone record.
+    /// Lists user-selectable Macs currently advertising on the nearby network.
+    func discoverNearbyMacs() async throws -> [PairingControlCandidate]
+
+    /// Completes the nearby pairing transcript and returns a durable record.
     /// Implementations must not persist a record until the Mac has authenticated
     /// the transcript and explicitly approved it.
-    func pair(offer: PairingOffer, displayName: String) async throws -> PairedReceiver
+    func pair(
+        candidate: PairingControlCandidate,
+        displayName: String,
+        onVerificationCode: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> PairedReceiver
 
     /// Performs a fresh reconnect handshake.  Returning a new session on every
     /// foreground is required; a cached pairing key is not sufficient to send
@@ -29,7 +36,15 @@ enum PhonePairingSessionError: Error, Equatable, Sendable {
 /// wired.  It makes the missing integration seam visible in the UI rather than
 /// fabricating nonces, stream keys, or endpoints.
 final class UnavailablePhonePairingSessionClient: PhonePairingSessionClient {
-    func pair(offer: PairingOffer, displayName: String) async throws -> PairedReceiver {
+    func discoverNearbyMacs() async throws -> [PairingControlCandidate] {
+        throw PhonePairingSessionError.handshakeUnavailable
+    }
+
+    func pair(
+        candidate: PairingControlCandidate,
+        displayName: String,
+        onVerificationCode: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> PairedReceiver {
         throw PhonePairingSessionError.handshakeUnavailable
     }
 

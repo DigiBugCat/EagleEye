@@ -20,47 +20,15 @@ public enum PairingServiceError: Error, Equatable, Sendable {
     case reconnectMismatch
 }
 
-/// The value encoded in a QR code.  It contains only the short-lived
-/// `GazeCore.PairingOffer`; no address, stream key, or gaze data is encoded.
-public enum PairingQRCodec {
-    public static let prefix = "eagle-gaze-pair:v1:"
-
-    public static func encode(_ offer: PairingOffer) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let payload = try encoder.encode(offer)
-        return prefix + payload.base64URLEncodedString()
-    }
-
-    public static func decode(_ value: String, now: Date = Date()) throws -> PairingOffer {
-        guard value.hasPrefix(prefix) else { throw PairingServiceError.offerMismatch }
-        let encoded = String(value.dropFirst(prefix.count))
-        guard encoded.count <= 16_384, let data = Data(base64URLString: encoded) else {
-            throw PairingServiceError.offerMismatch
-        }
-        do {
-            let offer = try JSONDecoder().decode(PairingOffer.self, from: data)
-            try offer.validate(at: now)
-            return offer
-        } catch let error as PairingOfferError {
-            throw error
-        } catch {
-            throw PairingServiceError.offerMismatch
-        }
-    }
-}
-
 public struct PairingOfferPresentation: Equatable, Sendable {
     public let offer: PairingOffer
-    public let qrString: String
 
-    public init(offer: PairingOffer, qrString: String) {
+    public init(offer: PairingOffer) {
         self.offer = offer
-        self.qrString = qrString
     }
 }
 
-/// Data sent by the phone after scanning the QR and completing its side of
+/// Data sent by the phone after receiving the nearby offer and completing its side of
 /// the P-256 transcript.  The Mac still requires explicit user confirmation
 /// before this request becomes durable.
 public struct PairingRequest: Equatable, Sendable {
@@ -126,7 +94,7 @@ public final class PairingService {
     public private(set) var state: PairingServiceState = .idle
     private var stateChangeHandler: StateChangeHandler?
 
-    /// Stable, nonsecret identity used to match a scanned offer to this Mac.
+    /// Stable, nonsecret identity bound into the selected Mac's offer transcript.
     public var receiverFingerprintValue: String { receiverFingerprint }
 
     public var currentOffer: PairingOfferPresentation? {
@@ -234,8 +202,8 @@ public final class PairingService {
         }
         expireOfferIfNeeded()
         guard pending == nil else { throw PairingServiceError.offerAlreadyAwaitingConfirmation }
-        // A visible offer is one-time and its advertisement is scoped to that
-        // offer.  Stop it before replacing the QR with a fresh offer.
+        // A one-time offer is scoped to one nearby pairing attempt. Stop it
+        // before replacing it with a fresh network-delivered offer.
         if activeOffer != nil { clearOffer() }
 
         let keyPair = P256EphemeralKeyPair()
@@ -247,8 +215,6 @@ public final class PairingService {
             serviceIdentity: serviceIdentity,
             expiresAt: now().addingTimeInterval(lifetime)
         )
-        let qrString = try PairingQRCodec.encode(offer)
-
         do {
             try advertisement?.start(offer: offer)
         } catch {
@@ -258,7 +224,7 @@ public final class PairingService {
 
         activeOffer = offer
         receiverEphemeralKey = keyPair
-        let presentation = PairingOfferPresentation(offer: offer, qrString: qrString)
+        let presentation = PairingOfferPresentation(offer: offer)
         transition(to: .offerVisible(presentation))
         return presentation
     }
@@ -341,10 +307,10 @@ public final class PairingService {
     }
 
     /// Converts a wire request only after every offer field has matched the
-    /// currently visible QR.  This prevents a valid transcript for another
-    /// receiver/offer from reaching the approval UI.
+    /// active nearby exchange. This prevents a valid transcript for another
+    /// receiver or stale offer from reaching the approval UI.
     @discardableResult
-    public func beginPairing(_ request: PairingQRRequest) throws -> PendingPairingConfirmation {
+    public func beginPairing(_ request: PairingInitiationRequest) throws -> PendingPairingConfirmation {
         try request.validate(at: now())
         guard let offer = activeOffer else { throw PairingServiceError.noActiveOffer }
         guard request.offerID == offer.offerID,

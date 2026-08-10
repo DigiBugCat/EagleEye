@@ -12,9 +12,10 @@ Read `README.md` and `voiceos.integration.json` before editing.
   reads, child processes, shell execution, telemetry, or external fetches.
 - Read-only tools have no confirmation. Any tool that changes EagleGaze state
   must declare a confirmation card in the manifest.
-- Never return raw ARKit data, gaze coordinates, face transforms, blink values,
-  or UI-only facts to VoiceOS.
-- Keep v0.1 free of setup fields. If a future feature is high-impact enough to
+- Never return raw ARKit data, global gaze coordinates, face transforms, blink
+  values, or UI-only facts to VoiceOS. An approved capture may include only
+  coordinates relative to its returned image.
+- Keep v0.2 free of setup fields. If a future feature is high-impact enough to
   require authentication, stop and design that boundary explicitly.
 - The Swift app remains the calibration source of truth. TypeScript is a narrow
   control/status adapter, not a second calibration implementation.

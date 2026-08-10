@@ -1,6 +1,7 @@
 import Foundation
 import GazeCore
 import Network
+import OSLog
 
 /// Authenticated reconnect result handed to the Mac source composition root.
 /// The source identifier is stable for a paired phone across reconnect
@@ -80,6 +81,7 @@ public struct PairingControlFrameHarness: Sendable {
 public final class PairingControlServer: PairingAdvertisementService, @unchecked Sendable {
     public static let serviceType = "_eagle-gaze-pair._tcp"
     public static let defaultTimeout: TimeInterval = 15
+    private static let logger = Logger(subsystem: "com.aviary.EagleGazeMac", category: "pairing-control")
 
     public typealias SessionReadyHandler = @Sendable (PairingAuthenticatedSession) -> Void
     public typealias SessionEndedHandler = @Sendable (UUID) -> Void
@@ -102,6 +104,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
     private var timers: [ObjectIdentifier: DispatchWorkItem] = [:]
     private var timerGenerations: [ObjectIdentifier: UInt64] = [:]
     private var messageTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    private var offerByConnection: [ObjectIdentifier: UUID] = [:]
     private var pairings: [UUID: PendingPairingConnection] = [:]
     private var reconnects: [ObjectIdentifier: PairingReconnectContext] = [:]
     private var sessionByConnection: [ObjectIdentifier: UUID] = [:]
@@ -111,7 +114,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
 
     private struct PendingPairingConnection {
         let connection: NWConnection
-        let request: PairingQRRequest
+        let request: PairingInitiationRequest
         let confirmation: PendingPairingConfirmation
     }
 
@@ -153,7 +156,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         try startListener(serviceName: offer.serviceIdentity)
     }
 
-    /// Starts the long-lived control listener before a QR offer is shown.
+    /// Starts the long-lived control listener before a nearby offer is requested.
     /// PairingService can then call `start(offer:)` repeatedly without tearing
     /// down reconnect availability after an offer is approved or expires.
     public func start() throws {
@@ -180,13 +183,20 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         }
         // Keep the Bonjour instance name equal to serviceIdentity: the phone
         // browser uses this stable nonsecret value to select the endpoint.
-        // Receiver fingerprint and all offer material remain QR/transcript
+        // Receiver fingerprint and all offer material remain transcript
         // fields, never TXT metadata.
         let boundedName = String(serviceName.prefix(63))
         newListener.service = NWListener.Service(name: boundedName, type: Self.serviceType, domain: nil, txtRecord: nil)
         newListener.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
-            if case .failed = state { self.stop() }
+            switch state {
+            case .ready:
+                Self.logger.notice("Nearby pairing listener ready service=\(serviceName, privacy: .public)")
+            case .failed(let error):
+                Self.logger.error("Nearby pairing listener failed error=\(error.localizedDescription, privacy: .public)")
+                self.stop()
+            default: break
+            }
         }
         newListener.newConnectionHandler = { [weak self] connection in
             self?.accept(connection)
@@ -199,11 +209,12 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         newListener.start(queue: queue)
     }
 
-    /// A QR offer is no longer visible, but the control listener remains
+    /// A one-time offer is no longer active, but the control listener remains
     /// advertised so already-paired phones can reconnect.
     public func stopOffer() {}
 
     public func stop() {
+        Self.logger.info("Nearby pairing listener stopping")
         lock.lock()
         let oldListener = listener
         listener = nil
@@ -213,6 +224,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         decoders.removeAll()
         messageTasks.values.forEach { $0.cancel() }
         messageTasks.removeAll()
+        offerByConnection.removeAll()
         timerGenerations.removeAll()
         pairings.removeAll()
         reconnects.removeAll()
@@ -245,6 +257,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
     /// Approves a pending request after the UI has shown the verification code.
     /// The pairing key is used only to MAC the response and is never encoded.
     public func approve(confirmationID: UUID) async throws -> PairedDeviceRecord {
+        Self.logger.notice("User approved pending pairing")
         guard let service = pairingService else { throw PairingControlServerError.notAttached }
         guard let pending = pendingConnection(confirmationID: confirmationID) else {
             throw PairingControlServerError.pendingConfirmationNotFound
@@ -272,6 +285,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
     }
 
     public func reject(confirmationID: UUID, reason: String? = nil) async throws {
+        Self.logger.notice("User rejected pending pairing")
         guard let service = pairingService else { throw PairingControlServerError.notAttached }
         guard let pending = pendingConnection(confirmationID: confirmationID) else {
             throw PairingControlServerError.pendingConfirmationNotFound
@@ -283,6 +297,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
     }
 
     private func accept(_ connection: NWConnection) {
+        Self.logger.info("Incoming pairing control connection accepted")
         let id = ObjectIdentifier(connection)
         lock.lock()
         connections[id] = connection
@@ -359,20 +374,48 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         do {
             let message = try PairingWireProtocol.decode(PairingControlMessage.self, payload: payload)
             switch message {
-            case .qrRequest(let request): try handle(request: request, on: connection)
+            case .nearbyOfferRequest(let request): try handle(offerRequest: request, on: connection)
+            case .pairingRequest(let request): try handle(request: request, on: connection)
             case .reconnectChallenge(let challenge): try handle(challenge: challenge, on: connection)
             case .reconnectConfirmation(let confirmation): try handle(confirmation: confirmation, on: connection)
-            case .macResponse, .reconnectResponse:
+            case .nearbyOfferResponse, .macResponse, .reconnectResponse:
                 throw PairingControlServerError.protocolViolation
             }
         } catch {
+            Self.logger.error("Pairing protocol message rejected error=\(error.localizedDescription, privacy: .public)")
             removeConnection(connection)
         }
     }
 
     @MainActor
-    private func handle(request: PairingQRRequest, on connection: NWConnection) throws {
+    private func handle(
+        offerRequest request: NearbyPairingOfferRequest,
+        on connection: NWConnection
+    ) throws {
+        Self.logger.info("Nearby offer requested")
         guard let service = pairingService else { throw PairingControlServerError.notAttached }
+        let presentation = try service.makeOffer()
+        let response = try NearbyPairingOfferResponse(
+            requestID: request.requestID,
+            offer: presentation.offer
+        )
+        lock.lock()
+        offerByConnection[ObjectIdentifier(connection)] = presentation.offer.offerID
+        lock.unlock()
+        try send(.nearbyOfferResponse(response), on: connection)
+        scheduleTimeout(for: connection, interval: presentation.offer.expiresAt.timeIntervalSinceNow)
+    }
+
+    @MainActor
+    private func handle(request: PairingInitiationRequest, on connection: NWConnection) throws {
+        Self.logger.notice("Pairing request awaiting user confirmation device=\(request.initiatorDisplayName, privacy: .public)")
+        guard let service = pairingService else { throw PairingControlServerError.notAttached }
+        lock.lock()
+        let connectionOfferID = offerByConnection[ObjectIdentifier(connection)]
+        lock.unlock()
+        guard connectionOfferID == request.offerID else {
+            throw PairingControlServerError.protocolViolation
+        }
         let confirmation = try service.beginPairing(request)
         let response = try PairingMacResponse.pending(
             offerID: request.offerID,
@@ -391,6 +434,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
 
     @MainActor
     private func handle(challenge: ReconnectChallenge, on connection: NWConnection) throws {
+        Self.logger.info("Saved pairing authentication challenge received session=\(challenge.sessionID.uuidString.prefix(8), privacy: .public)")
         guard let service = pairingService else { throw PairingControlServerError.notAttached }
         let context = try service.prepareReconnect(challenge)
         lock.lock()
@@ -437,10 +481,16 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         sessionByConnection[id] = confirmation.sessionID
         reconnects.removeValue(forKey: id)
         lock.unlock()
+        // Install the replacement session before retiring the old logical
+        // session. Composition can then rotate keys on the already-running
+        // UDP listener; stopping the old session first would tear down and
+        // republish Bonjour on a new port, leaving the phone with a stale UDP
+        // endpoint even though Network.framework reports it as ready.
+        sessionReady?(authenticated)
         if let previousSession, previousSession != confirmation.sessionID {
             sessionEnded?(previousSession)
         }
-        sessionReady?(authenticated)
+        Self.logger.notice("Authenticated phone session ready device=\(context.record.displayName, privacy: .public) session=\(confirmation.sessionID.uuidString.prefix(8), privacy: .public)")
         // Control TCP is complete; the authenticated UDP session remains
         // active until composition explicitly deactivates it.
         lock.lock()
@@ -485,6 +535,10 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
     private func removeConnection(_ connection: NWConnection) {
         let id = ObjectIdentifier(connection)
         lock.lock()
+        let ownedOfferID = offerByConnection.removeValue(forKey: id)
+        let removedConfirmationIDs = pairings.compactMap { entry in
+            entry.value.connection === connection ? entry.key : nil
+        }
         let endedSession = sessionByConnection[id]
         let wasActive = endedSession != nil && endedSession == activeSessionID
         connections.removeValue(forKey: id)
@@ -502,6 +556,17 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
         }
         lock.unlock()
         connection.cancel()
+        if let ownedOfferID {
+            Task { @MainActor [weak self] in
+                guard let service = self?.pairingService else { return }
+                if let confirmationID = removedConfirmationIDs.first,
+                   service.pendingConfirmation?.confirmationID == confirmationID {
+                    try? service.rejectPairing(confirmationID: confirmationID)
+                } else if service.currentOffer?.offer.offerID == ownedOfferID {
+                    service.cancelOffer()
+                }
+            }
+        }
         if let endedSession { sessionEnded?(endedSession) }
     }
 }

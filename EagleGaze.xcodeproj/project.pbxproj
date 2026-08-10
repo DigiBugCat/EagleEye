@@ -11,12 +11,9 @@
 		010000000000000000000102 /* EagleGazePhoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000102 /* EagleGazePhoneApp.swift */;};
 		010000000000000000000103 /* FaceTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000103 /* FaceTrackingService.swift */;};
 		010000000000000000000104 /* GazeSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000104 /* GazeSender.swift */;};
-		010000000000000000000105 /* AVFoundationQRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000105 /* AVFoundationQRScanner.swift */;};
 		010000000000000000000106 /* NetworkPairingControlTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000106 /* NetworkPairingControlTransport.swift */;};
 		010000000000000000000107 /* PairedReceiverCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000107 /* PairedReceiverCatalog.swift */;};
 		010000000000000000000108 /* PairingControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000108 /* PairingControlClient.swift */;};
-		010000000000000000000109 /* PairingOfferParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000109 /* PairingOfferParser.swift */;};
-		01000000000000000000010A /* QRScannerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010A /* QRScannerCoordinator.swift */;};
 		01000000000000000000010B /* PairedReceiverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010B /* PairedReceiverStore.swift */;};
 		01000000000000000000010C /* PhoneGazePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010C /* PhoneGazePipeline.swift */;};
 		01000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift */;};
@@ -43,7 +40,6 @@
 		010000000000000000000122 /* PairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000122 /* PairingService.swift */;};
 		010000000000000000000123 /* DisplayProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000123 /* DisplayProvider.swift */;};
 		010000000000000000000124 /* GazeOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000124 /* GazeOverlayController.swift */;};
-		010000000000000000000125 /* PairingQRView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000125 /* PairingQRView.swift */;};
 		010000000000000000000126 /* MacPrivacyDisclosure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000126 /* MacPrivacyDisclosure.swift */;};
 		010000000000000000000127 /* MacPrivacyDisclosureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000127 /* MacPrivacyDisclosureStore.swift */;};
 		010000000000000000000128 /* ARKitNetworkSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000128 /* ARKitNetworkSource.swift */;};
@@ -60,9 +56,13 @@
 		010000000000000000000133 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000003 /* GazeCore */;};
 		010000000000000000000134 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* GazeCore */;};
 		010000000000000000000135 /* GazeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000003 /* GazeCore */;};
+		01000000000000000000013B /* GazeCaptureConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000013B /* GazeCaptureConfiguration.swift */;};
+		01000000000000000000013C /* GazeCropKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000005 /* GazeCropKit */;};
 		010000000000000000000136 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000135 /* XCTest.framework */;};
 		010000000000000000000137 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000135 /* XCTest.framework */;};
 		010000000000000000000138 /* EagleGazeMenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000138 /* EagleGazeMenuBarView.swift */;};
+		010000000000000000000139 /* GazeCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000139 /* GazeCaptureService.swift */;};
+		01000000000000000000013A /* GazeCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000013A /* GazeCaptureTests.swift */;};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,12 +71,9 @@
 		020000000000000000000102 /* EagleGazePhoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EagleGazePhoneApp.swift; sourceTree = "<group>"; };
 		020000000000000000000103 /* FaceTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceTrackingService.swift; sourceTree = "<group>"; };
 		020000000000000000000104 /* GazeSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeSender.swift; sourceTree = "<group>"; };
-		020000000000000000000105 /* AVFoundationQRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/AVFoundationQRScanner.swift; sourceTree = "<group>"; };
 		020000000000000000000106 /* NetworkPairingControlTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/NetworkPairingControlTransport.swift; sourceTree = "<group>"; };
 		020000000000000000000107 /* PairedReceiverCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairedReceiverCatalog.swift; sourceTree = "<group>"; };
 		020000000000000000000108 /* PairingControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingControlClient.swift; sourceTree = "<group>"; };
-		020000000000000000000109 /* PairingOfferParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingOfferParser.swift; sourceTree = "<group>"; };
-		02000000000000000000010A /* QRScannerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/QRScannerCoordinator.swift; sourceTree = "<group>"; };
 		02000000000000000000010B /* PairedReceiverStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/PairedReceiverStore.swift; sourceTree = "<group>"; };
 		02000000000000000000010C /* PhoneGazePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline/PhoneGazePipeline.swift; sourceTree = "<group>"; };
 		02000000000000000000010D /* KeychainPhonePrivacyConsentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/KeychainPhonePrivacyConsentStore.swift; sourceTree = "<group>"; };
@@ -103,7 +100,6 @@
 		020000000000000000000122 /* PairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing/PairingService.swift; sourceTree = "<group>"; };
 		020000000000000000000123 /* DisplayProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/DisplayProvider.swift; sourceTree = "<group>"; };
 		020000000000000000000124 /* GazeOverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/GazeOverlayController.swift; sourceTree = "<group>"; };
-		020000000000000000000125 /* PairingQRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/PairingQRView.swift; sourceTree = "<group>"; };
 		020000000000000000000126 /* MacPrivacyDisclosure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/MacPrivacyDisclosure.swift; sourceTree = "<group>"; };
 		020000000000000000000127 /* MacPrivacyDisclosureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Privacy/MacPrivacyDisclosureStore.swift; sourceTree = "<group>"; };
 		020000000000000000000128 /* ARKitNetworkSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ARKitNetworkSource.swift; sourceTree = "<group>"; };
@@ -125,34 +121,37 @@
 		020000000000000000000136 /* EagleGazePhoneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EagleGazePhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		020000000000000000000137 /* EagleGazeMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EagleGazeMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		020000000000000000000138 /* EagleGazeMenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Presentation/EagleGazeMenuBarView.swift; sourceTree = "<group>"; };
+		020000000000000000000139 /* GazeCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture/GazeCaptureService.swift; sourceTree = "<group>"; };
+		02000000000000000000013A /* GazeCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazeCaptureTests.swift; sourceTree = "<group>"; };
+		02000000000000000000013B /* GazeCaptureConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture/GazeCaptureConfiguration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		030000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000132); runOnlyForDeploymentPostprocessing = 0; };
-		030000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000133); runOnlyForDeploymentPostprocessing = 0; };
+		030000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000133, 01000000000000000000013C); runOnlyForDeploymentPostprocessing = 0; };
 		030000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000134, 010000000000000000000136); runOnlyForDeploymentPostprocessing = 0; };
 		030000000000000000000004 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000135, 010000000000000000000137); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		040000000000000000000001 = {isa = PBXGroup; children = (040000000000000000000002, 040000000000000000000003, 040000000000000000000006, 040000000000000000000007, 040000000000000000000004, 040000000000000000000005); sourceTree = "<group>"; };
-		040000000000000000000002 /* Phone */ = {isa = PBXGroup; children = (020000000000000000000100, 020000000000000000000101, 020000000000000000000102, 020000000000000000000103, 020000000000000000000104, 020000000000000000000105, 020000000000000000000106, 020000000000000000000107, 020000000000000000000108, 020000000000000000000109, 02000000000000000000010A, 02000000000000000000010B, 02000000000000000000010C, 02000000000000000000010D, 02000000000000000000010E, 02000000000000000000010F, 020000000000000000000110, 020000000000000000000111, 020000000000000000000112, 020000000000000000000113, 020000000000000000000114, 020000000000000000000115, 020000000000000000000116, 020000000000000000000131, 020000000000000000000132); path = Phone; sourceTree = "<group>"; };
-		040000000000000000000003 /* Mac */ = {isa = PBXGroup; children = (020000000000000000000117, 020000000000000000000118, 020000000000000000000119, 02000000000000000000011A, 02000000000000000000011B, 02000000000000000000011C, 02000000000000000000011D, 02000000000000000000011E, 02000000000000000000011F, 020000000000000000000120, 020000000000000000000121, 020000000000000000000122, 020000000000000000000123, 020000000000000000000124, 020000000000000000000125, 020000000000000000000126, 020000000000000000000127, 020000000000000000000128, 020000000000000000000129, 02000000000000000000012A, 020000000000000000000138, 020000000000000000000133, 020000000000000000000134); path = Mac; sourceTree = "<group>"; };
+		040000000000000000000002 /* Phone */ = {isa = PBXGroup; children = (020000000000000000000100, 020000000000000000000101, 020000000000000000000102, 020000000000000000000103, 020000000000000000000104, 020000000000000000000106, 020000000000000000000107, 020000000000000000000108, 02000000000000000000010B, 02000000000000000000010C, 02000000000000000000010D, 02000000000000000000010E, 02000000000000000000010F, 020000000000000000000110, 020000000000000000000111, 020000000000000000000112, 020000000000000000000113, 020000000000000000000114, 020000000000000000000115, 020000000000000000000116, 020000000000000000000131, 020000000000000000000132); path = Phone; sourceTree = "<group>"; };
+		040000000000000000000003 /* Mac */ = {isa = PBXGroup; children = (020000000000000000000117, 020000000000000000000118, 020000000000000000000119, 02000000000000000000011A, 02000000000000000000011B, 02000000000000000000011C, 02000000000000000000011D, 02000000000000000000011E, 02000000000000000000011F, 020000000000000000000120, 020000000000000000000121, 020000000000000000000122, 020000000000000000000123, 020000000000000000000124, 020000000000000000000126, 020000000000000000000127, 020000000000000000000128, 020000000000000000000129, 02000000000000000000012A, 020000000000000000000138, 020000000000000000000139, 02000000000000000000013B, 020000000000000000000133, 020000000000000000000134); path = Mac; sourceTree = "<group>"; };
 		040000000000000000000006 /* PhoneTests */ = {isa = PBXGroup; children = (02000000000000000000012B, 02000000000000000000012C, 02000000000000000000012D, 02000000000000000000012E); path = PhoneTests; sourceTree = "<group>"; };
-		040000000000000000000007 /* MacTests */ = {isa = PBXGroup; children = (02000000000000000000012F, 020000000000000000000130); path = MacTests; sourceTree = "<group>"; };
+		040000000000000000000007 /* MacTests */ = {isa = PBXGroup; children = (02000000000000000000012F, 020000000000000000000130, 02000000000000000000013A); path = MacTests; sourceTree = "<group>"; };
 		040000000000000000000004 /* Packages */ = {isa = PBXGroup; children = (); path = Packages; sourceTree = "<group>"; };
 		040000000000000000000005 /* Products */ = {isa = PBXGroup; children = (02000000000000000000000A, 02000000000000000000000B, 020000000000000000000136, 020000000000000000000137); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		050000000000000000000001 /* EagleGazePhone */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000002; buildPhases = (070000000000000000000001, 030000000000000000000001, 080000000000000000000001); buildRules = (); dependencies = (); name = EagleGazePhone; packageProductDependencies = (0D0000000000000000000002); productName = EagleGazePhone; productReference = 02000000000000000000000A; productType = "com.apple.product-type.application"; };
-		050000000000000000000002 /* EagleGazeMac */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000003; buildPhases = (070000000000000000000002, 030000000000000000000002, 080000000000000000000002); buildRules = (); dependencies = (); name = EagleGazeMac; packageProductDependencies = (0D0000000000000000000003); productName = EagleGazeMac; productReference = 02000000000000000000000B; productType = "com.apple.product-type.application"; };
+		050000000000000000000002 /* EagleGazeMac */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000003; buildPhases = (070000000000000000000002, 030000000000000000000002, 080000000000000000000002); buildRules = (); dependencies = (); name = EagleGazeMac; packageProductDependencies = (0D0000000000000000000003, 0D0000000000000000000005); productName = EagleGazeMac; productReference = 02000000000000000000000B; productType = "com.apple.product-type.application"; };
 		050000000000000000000003 /* EagleGazePhoneTests */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000004; buildPhases = (070000000000000000000003, 030000000000000000000003, 080000000000000000000003); buildRules = (); dependencies = (090000000000000000000001); name = EagleGazePhoneTests; packageProductDependencies = (0D0000000000000000000002); productName = EagleGazePhoneTests; productReference = 020000000000000000000136; productType = "com.apple.product-type.bundle.unit-test"; };
 		050000000000000000000004 /* EagleGazeMacTests */ = {isa = PBXNativeTarget; buildConfigurationList = 0B0000000000000000000005; buildPhases = (070000000000000000000004, 030000000000000000000004, 080000000000000000000004); buildRules = (); dependencies = (090000000000000000000002); name = EagleGazeMacTests; packageProductDependencies = (0D0000000000000000000003); productName = EagleGazeMacTests; productReference = 020000000000000000000137; productType = "com.apple.product-type.bundle.unit-test"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		060000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2660; LastUpgradeCheck = 2660; TargetAttributes = {050000000000000000000001 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000002 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000003 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000001; }; 050000000000000000000004 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000002; };};}; buildConfigurationList = 0B0000000000000000000001; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 040000000000000000000001; packageReferences = (0D0000000000000000000001); productRefGroup = 040000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (050000000000000000000001, 050000000000000000000002, 050000000000000000000003, 050000000000000000000004); };
+		060000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2660; LastUpgradeCheck = 2660; TargetAttributes = {050000000000000000000001 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000002 = {CreatedOnToolsVersion = 26.6; }; 050000000000000000000003 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000001; }; 050000000000000000000004 = {CreatedOnToolsVersion = 26.6; TestTargetID = 050000000000000000000002; };};}; buildConfigurationList = 0B0000000000000000000001; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 040000000000000000000001; packageReferences = (0D0000000000000000000001, 0D0000000000000000000004); productRefGroup = 040000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (050000000000000000000001, 050000000000000000000002, 050000000000000000000003, 050000000000000000000004); };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
@@ -163,10 +162,10 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		070000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000100, 010000000000000000000101, 010000000000000000000102, 010000000000000000000103, 010000000000000000000104, 010000000000000000000105, 010000000000000000000106, 010000000000000000000107, 010000000000000000000108, 010000000000000000000109, 01000000000000000000010A, 01000000000000000000010B, 01000000000000000000010C, 01000000000000000000010D, 01000000000000000000010E, 01000000000000000000010F, 010000000000000000000110, 010000000000000000000111, 010000000000000000000112, 010000000000000000000113, 010000000000000000000114, 010000000000000000000115, 010000000000000000000116); runOnlyForDeploymentPostprocessing = 0; };
-		070000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000117, 010000000000000000000118, 010000000000000000000119, 01000000000000000000011A, 01000000000000000000011B, 01000000000000000000011C, 01000000000000000000011D, 01000000000000000000011E, 01000000000000000000011F, 010000000000000000000120, 010000000000000000000121, 010000000000000000000122, 010000000000000000000123, 010000000000000000000124, 010000000000000000000125, 010000000000000000000126, 010000000000000000000127, 010000000000000000000128, 010000000000000000000129, 01000000000000000000012A, 010000000000000000000138); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000100, 010000000000000000000101, 010000000000000000000102, 010000000000000000000103, 010000000000000000000104, 010000000000000000000106, 010000000000000000000107, 010000000000000000000108, 01000000000000000000010B, 01000000000000000000010C, 01000000000000000000010D, 01000000000000000000010E, 01000000000000000000010F, 010000000000000000000110, 010000000000000000000111, 010000000000000000000112, 010000000000000000000113, 010000000000000000000114, 010000000000000000000115, 010000000000000000000116); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000117, 010000000000000000000118, 010000000000000000000119, 01000000000000000000011A, 01000000000000000000011B, 01000000000000000000011C, 01000000000000000000011D, 01000000000000000000011E, 01000000000000000000011F, 010000000000000000000120, 010000000000000000000121, 010000000000000000000122, 010000000000000000000123, 010000000000000000000124, 010000000000000000000126, 010000000000000000000127, 010000000000000000000128, 010000000000000000000129, 01000000000000000000012A, 010000000000000000000138, 010000000000000000000139, 01000000000000000000013B); runOnlyForDeploymentPostprocessing = 0; };
 		070000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (01000000000000000000012B, 01000000000000000000012C, 01000000000000000000012D, 01000000000000000000012E); runOnlyForDeploymentPostprocessing = 0; };
-		070000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (01000000000000000000012F, 010000000000000000000130); runOnlyForDeploymentPostprocessing = 0; };
+		070000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (01000000000000000000012F, 010000000000000000000130, 01000000000000000000013A); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -202,11 +201,13 @@
 
 /* Begin XCLocalSwiftPackageReference section */
 		0D0000000000000000000001 /* XCLocalSwiftPackageReference "Packages/GazeCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/GazeCore; };
+		0D0000000000000000000004 /* XCLocalSwiftPackageReference "Packages/GazeCropKit" */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/GazeCropKit; };
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		0D0000000000000000000002 /* GazeCore */ = {isa = XCSwiftPackageProductDependency; package = 0D0000000000000000000001; productName = GazeCore; };
 		0D0000000000000000000003 /* GazeCore */ = {isa = XCSwiftPackageProductDependency; package = 0D0000000000000000000001; productName = GazeCore; };
+		0D0000000000000000000005 /* GazeCropKit */ = {isa = XCSwiftPackageProductDependency; package = 0D0000000000000000000004; productName = GazeCropKit; };
 /* End XCSwiftPackageProductDependency section */
 
 };
