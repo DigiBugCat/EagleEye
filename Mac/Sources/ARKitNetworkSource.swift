@@ -1,6 +1,6 @@
 import Foundation
 import GazeCore
-import Network
+@preconcurrency import Network
 
 public enum GazeSourceIngestRejection: Error, Equatable, Sendable {
     case oversized(actual: Int, maximum: Int)
@@ -324,9 +324,15 @@ public final class ARKitNetworkSource: GazeSource {
         let id = ObjectIdentifier(connection)
         connections[id] = connection
         connection.stateUpdateHandler = { [weak self, weak connection] state in
-            guard let connection else { return }
-            if case .failed = state { Task { @MainActor in self?.remove(connection) } }
-            if case .cancelled = state { Task { @MainActor in self?.remove(connection) } }
+            switch state {
+            case .failed, .cancelled:
+                Task { @MainActor [weak self, weak connection] in
+                    guard let self, let connection else { return }
+                    self.remove(connection)
+                }
+            default:
+                break
+            }
         }
         connection.start(queue: queue)
         receive(on: connection)
@@ -338,10 +344,11 @@ public final class ARKitNetworkSource: GazeSource {
 
     private func receive(on connection: NWConnection) {
         connection.receiveMessage { [weak self, weak connection] data, _, _, error in
-            guard let self, let connection else { return }
-            Task { @MainActor in
+            let shouldContinue = error == nil
+            Task { @MainActor [weak self, weak connection, data, shouldContinue] in
+                guard let self, let connection else { return }
                 if let data, !data.isEmpty { _ = self.ingest(data) }
-                if error == nil { self.receive(on: connection) }
+                if shouldContinue { self.receive(on: connection) }
                 else { self.remove(connection); connection.cancel() }
             }
         }
