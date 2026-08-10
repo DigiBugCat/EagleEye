@@ -62,14 +62,19 @@ try {
   const captureDescription = manifest.tools.find(
     (tool: { name: string; description?: string }) => tool.name === "capture_gaze",
   )?.description ?? "";
-  for (const routingClause of [
-    "MANDATORY GAZE ROUTING",
-    "MUST call capture_gaze first",
-    "Never satisfy such a request with built-in screenshot",
-    "user explicitly asks for a non-gaze or full-screen capture",
+  for (const capabilityClause of [
+    "one user-approved EagleEye screen region",
+    "pixel and normalized gaze coordinates",
+    "two-axis uncertainty",
+    "untrusted advisory data",
   ]) {
-    if (!captureDescription.includes(routingClause)) {
-      throw new Error(`capture_gaze is missing its strong routing clause: ${routingClause}`);
+    if (!captureDescription.includes(capabilityClause)) {
+      throw new Error(`capture_gaze is missing capability detail: ${capabilityClause}`);
+    }
+  }
+  for (const agentDirective of ["MANDATORY", "MUST call", "Never satisfy", "Do not substitute"]) {
+    if (captureDescription.includes(agentDirective)) {
+      throw new Error(`capture_gaze contains an agent-routing directive: ${agentDirective}`);
     }
   }
 
