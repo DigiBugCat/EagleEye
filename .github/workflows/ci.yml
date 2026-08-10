@@ -1,37 +1,26 @@
 name: CI
 
 on:
-  # This private repository's write-access list is the trust boundary for Duck.
-  # Every branch push runs CI; fork pull-request code does not run independently.
   push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: eaglegaze-ci-${{ github.ref }}
+  group: eagleeye-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test-and-build:
-    runs-on: [self-hosted, macOS, ARM64, duck, native-ios, eaglegaze]
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - name: Require native build disk headroom
-        shell: bash
-        run: |
-          minimum_available_kib=10485760
-          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR == 2 { print $4 }')"
-          if [ -z "$available_kib" ] || [ "$available_kib" -lt "$minimum_available_kib" ]; then
-            echo "Duck needs at least 10 GiB free before starting native verification." >&2
-            df -h "$RUNNER_TEMP" >&2
-            exit 1
-          fi
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -45,10 +34,14 @@ jobs:
         working-directory: VoiceOS
         run: |
           bun install --frozen-lockfile
+          bun audit --prod
           bun run verify
 
       - name: Test GazeCore
         run: swift test --package-path Packages/GazeCore
+
+      - name: Test GazeCropKit
+        run: swift test --package-path Packages/GazeCropKit
 
       - name: Build macOS app
         run: >-
@@ -69,23 +62,19 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      # Duck runs headlessly and has no per-login com.apple.testmanagerd
-      # service. Build the hosted XCTest bundle here; the same scheme is
-      # executed on a logged-in Mac in the local release gate.
-      - name: Build macOS test modules
+      - name: Test macOS app modules
         run: >-
           xcodebuild
           -project EagleGaze.xcodeproj
-          -scheme EagleGazeMac
-          -destination 'platform=macOS,arch=arm64'
-          ONLY_ACTIVE_ARCH=YES
+          -scheme EagleGazeMacTests
+          -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
-          build-for-testing
+          test
 
       - name: Select an available iPhone simulator
         shell: bash
         run: |
-          destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhone -showdestinations)"
+          destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhoneTests -showdestinations)"
           simulator_udid="$(sed -nE 's/.*platform:iOS Simulator, arch:[^,]+, id:([^,]+),.*/\1/p' <<< "$destinations" | head -1 | tr -d ' ')"
           if [ -z "$simulator_udid" ]; then
             echo "Duck has no iPhone simulator accepted by the EagleGazePhone scheme." >&2
@@ -100,7 +89,7 @@ jobs:
         run: >-
           xcodebuild
           -project EagleGaze.xcodeproj
-          -scheme EagleGazePhone
+          -scheme EagleGazePhoneTests
           -destination "platform=iOS Simulator,id=$EAGLEGAZE_SIMULATOR_UDID"
           CODE_SIGNING_ALLOWED=NO
           test
