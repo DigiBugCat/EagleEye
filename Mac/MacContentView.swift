@@ -302,6 +302,12 @@ struct MacContentView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+                if let failure = application.calibrationFailureText {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             sourceAndDisplaySetup

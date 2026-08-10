@@ -215,6 +215,18 @@ final class EagleGazeApplication: ObservableObject, GazeApplicationService {
         }
     }
 
+    var calibrationFailureText: String? {
+        guard snapshot.phase == .failed, let error = snapshot.calibrationError else { return nil }
+        switch error {
+        case let .validationFailed(rms, worst):
+            return "The candidate was not accurate enough (RMS \(rms.formatted(.number.precision(.fractionLength(3)))), worst \(worst.formatted(.number.precision(.fractionLength(3))))). Your previous accepted calibration was not replaced."
+        case .cannotFitCalibration, .cannotFitMapping:
+            return "The collected targets could not produce a stable mapping. Keep the phone fixed, make sure both eyes are visible, and try again."
+        default:
+            return "Calibration stopped because the collected evidence was not reliable enough. Try again with the phone fixed and both eyes visible."
+        }
+    }
+
     func selectSource(_ id: GazeSourceID) {
         guard let option = sourceOptions.first(where: { $0.id == id }) else { return }
         guard option.isAvailable else {

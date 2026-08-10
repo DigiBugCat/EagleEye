@@ -152,7 +152,10 @@ final class PhoneGazePipeline {
             sequence: extractedFrame.sequence,
             captureUptime: extractedFrame.captureUptime,
             validity: extractedFrame.validity,
-            confidence: extractedFrame.confidence,
+            // ARKit does not publish a gaze-accuracy score. This is a
+            // reliability signal derived from eye openness, tracking, motion,
+            // and plausible camera distance; it must not be read as accuracy.
+            confidence: trackingConfidence(capture: capture, metrics: metrics),
             point: extractedFrame.point,
             coordinateSpace: extractedFrame.coordinateSpace,
             blink: extractedFrame.blink,
@@ -226,6 +229,24 @@ final class PhoneGazePipeline {
             headLinearVelocity: linearVelocity,
             geometry: geometry.isFinite ? geometry : nil
         )
+    }
+
+    private func trackingConfidence(
+        capture: FaceCapture,
+        metrics: GazeTrackingMetrics
+    ) -> Double {
+        guard capture.isTracked, metrics.isFinite else { return 0 }
+        let openness = 1 - min(1, max(Double(capture.blinkLeft), Double(capture.blinkRight)))
+        let motionReliability = exp(
+            -(metrics.headAngularVelocity / 3 + metrics.headLinearVelocity / 0.6)
+        )
+        let distance = metrics.geometry.map {
+            ($0.facePosition.x * $0.facePosition.x
+                + $0.facePosition.y * $0.facePosition.y
+                + $0.facePosition.z * $0.facePosition.z).squareRoot()
+        } ?? 0.6
+        let distanceReliability = (0.25...0.90).contains(distance) ? 1.0 : 0.65
+        return min(1, max(0, openness * (0.72 + 0.28 * motionReliability) * distanceReliability))
     }
 
     private func normalized(_ value: Vector3) -> Vector3 {

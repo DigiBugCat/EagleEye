@@ -72,6 +72,7 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
     public let targetEpoch: UInt64
     public let profile: CalibrationProfile?
     public let mappedPoint: Point2D?
+    public let calibrationError: CalibrationEngineError?
     public let isPaused: Bool
     public let error: CalibrationCoordinatorError?
 
@@ -95,6 +96,7 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
         targetEpoch: UInt64 = 0,
         profile: CalibrationProfile? = nil,
         mappedPoint: Point2D? = nil,
+        calibrationError: CalibrationEngineError? = nil,
         isPaused: Bool = false,
         error: CalibrationCoordinatorError? = nil
     ) {
@@ -117,6 +119,7 @@ public struct CalibrationCoordinatorSnapshot: Equatable, Sendable {
         self.targetEpoch = targetEpoch
         self.profile = profile
         self.mappedPoint = mappedPoint
+        self.calibrationError = calibrationError
         self.isPaused = isPaused
         self.error = error
     }
@@ -446,6 +449,7 @@ public final class CalibrationCoordinator: @unchecked Sendable {
             targetEpoch: state.targetEpoch,
             profile: profile,
             mappedPoint: mappedPoint,
+            calibrationError: state.error,
             isPaused: paused ?? snapshot.isPaused,
             error: errorOverride ?? snapshot.error
         )
