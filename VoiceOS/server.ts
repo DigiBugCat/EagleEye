@@ -750,7 +750,7 @@ server.registerTool(
   {
     title: "Capture gaze",
     description:
-      "Capture one approved screenshot region containing the estimated gaze, mark that gaze, and return the image, image-relative coordinates, bounded region metadata, and optional untrusted provider enrichment. Use when the user asks to show or identify what they are looking at.",
+      "ROUTING REQUIREMENT: Call this tool whenever the user asks what they are looking at, where their gaze is, what is under/near their gaze, to capture/show gaze context, or to inspect the screen specifically through EagleGaze. Do not substitute a generic screenshot, screen-capture, computer-use, or vision tool: those tools do not provide EagleGaze's calibrated gaze location, image-relative coordinates, semantic crop, or app-owned approval. This tool captures one approved screen region containing the estimated gaze, marks it, and returns the image, coordinates, bounded region metadata, and optional untrusted provider enrichment. Use a generic screen tool only when the user explicitly requests a non-gaze/full-screen capture, or after this tool returns a structured unavailable, permission, connection, or calibration error.",
     inputSchema: {
       marker: z.enum(["circle", "square"]).optional().default("circle")
         .describe("Shape drawn around the estimated gaze location."),

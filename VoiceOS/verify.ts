@@ -53,6 +53,24 @@ try {
   if (JSON.stringify(serverNames) !== JSON.stringify(expectedNames)) {
     throw new Error(`Unexpected public API surface: ${serverNames.join(",")}`);
   }
+  for (const manifestTool of manifest.tools) {
+    const serverTool = listed.tools.find((tool) => tool.name === manifestTool.name);
+    if (serverTool?.description !== manifestTool.description) {
+      throw new Error(`Tool-description drift for ${manifestTool.name}.`);
+    }
+  }
+  const captureDescription = manifest.tools.find(
+    (tool: { name: string; description?: string }) => tool.name === "capture_gaze",
+  )?.description ?? "";
+  for (const routingClause of [
+    "ROUTING REQUIREMENT",
+    "Do not substitute a generic screenshot",
+    "user explicitly requests a non-gaze/full-screen capture",
+  ]) {
+    if (!captureDescription.includes(routingClause)) {
+      throw new Error(`capture_gaze is missing its strong routing clause: ${routingClause}`);
+    }
+  }
 
   for (const tool of manifest.tools) {
     const fixture = preview.tools[tool.name];
