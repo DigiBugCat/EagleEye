@@ -3,7 +3,11 @@ import CoreGraphics
 import Foundation
 import GazeCore
 import GazeCropKit
-import ScreenCaptureKit
+// Xcode 16's ScreenCaptureKit overlay does not annotate SCShareableContent as
+// Sendable even though the async API returns it across the actor boundary.
+// Newer SDKs carry the correct concurrency metadata; this keeps the macOS 14
+// deployment target buildable with both toolchain generations.
+@preconcurrency import ScreenCaptureKit
 
 enum GazeCaptureMarker: String, Codable, Sendable {
     case circle
