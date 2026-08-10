@@ -216,6 +216,44 @@ public struct GazeTrackingMetrics: Codable, Equatable, Sendable {
     }
 }
 
+/// The complete metric gaze ray emitted by the tracker. The origin and
+/// direction share the same session coordinate system. Keeping this evidence
+/// alongside the legacy projected point lets calibration compare a
+/// direction-only mapping with a physical screen-plane model without changing
+/// the authenticated transport envelope.
+public struct GazeRay3D: Codable, Equatable, Sendable {
+    public let origin: Vector3
+    public let direction: Vector3
+
+    public init(origin: Vector3, direction: Vector3) {
+        self.origin = origin
+        self.direction = direction
+    }
+
+    public var isFinite: Bool {
+        [origin.x, origin.y, origin.z,
+         direction.x, direction.y, direction.z].allSatisfy(\.isFinite)
+    }
+
+    public var normalized: GazeRay3D? {
+        guard isFinite else { return nil }
+        let magnitude = (
+            direction.x * direction.x
+                + direction.y * direction.y
+                + direction.z * direction.z
+        ).squareRoot()
+        guard magnitude.isFinite, magnitude > 1e-9 else { return nil }
+        return GazeRay3D(
+            origin: origin,
+            direction: Vector3(
+                x: direction.x / magnitude,
+                y: direction.y / magnitude,
+                z: direction.z / magnitude
+            )
+        )
+    }
+}
+
 /// Source-independent gaze observation consumed by calibration, smoothing, and
 /// presentation.  Raw ARKit transforms never cross this boundary.
 public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
@@ -233,6 +271,9 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
     /// tracking run from leaking into a new calibration target epoch.
     public let trackingRunID: UInt64?
     public let trackingMetrics: GazeTrackingMetrics?
+    /// Optional for backward wire/profile compatibility. New ARKit senders
+    /// populate it; older senders continue to drive the 2D candidate.
+    public let gazeRay: GazeRay3D?
 
     /// Convenience spelling used by consumers that call the source session
     /// simply `sessionID` (the wire model uses that spelling).
@@ -250,7 +291,8 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         blink: BlinkState? = nil,
         blinkConfidence: Double? = nil,
         trackingRunID: UInt64? = nil,
-        trackingMetrics: GazeTrackingMetrics? = nil
+        trackingMetrics: GazeTrackingMetrics? = nil,
+        gazeRay: GazeRay3D? = nil
     ) {
         self.sourceID = sourceID
         self.sourceSessionID = sourceSessionID
@@ -264,6 +306,7 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         self.blinkConfidence = blinkConfidence
         self.trackingRunID = trackingRunID
         self.trackingMetrics = trackingMetrics
+        self.gazeRay = gazeRay
     }
 
     public init(
@@ -278,7 +321,8 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
         blink: BlinkState? = nil,
         blinkConfidence: Double? = nil,
         trackingRunID: UInt64? = nil,
-        trackingMetrics: GazeTrackingMetrics? = nil
+        trackingMetrics: GazeTrackingMetrics? = nil,
+        gazeRay: GazeRay3D? = nil
     ) {
         self.init(
             sourceID: sourceID,
@@ -292,7 +336,8 @@ public struct CanonicalGazeFrame: Codable, Equatable, Sendable {
             blink: blink,
             blinkConfidence: blinkConfidence,
             trackingRunID: trackingRunID,
-            trackingMetrics: trackingMetrics
+            trackingMetrics: trackingMetrics,
+            gazeRay: gazeRay
         )
     }
 }

@@ -57,6 +57,15 @@ public enum CalibrationEngineEvent: Equatable, Sendable {
     case sampleRejected(mode: CalibrationEngineMode, index: Int, reason: CalibrationSampleRejectionReason)
     case targetRetried(mode: CalibrationEngineMode, index: Int, retry: Int, reason: CalibrationHoldReason)
     case candidateFitted(CalibrationReport)
+    case rayPlaneCandidateFitted(RayScreenCalibrationReport)
+    case rayPlaneCandidateUnavailable(String)
+    case modelComparisonCompleted(
+        legacyRMS: Double?,
+        legacyWorst: Double?,
+        rayPlaneRMS: Double?,
+        rayPlaneWorst: Double?,
+        selected: CalibrationModelSelection?
+    )
     case calibrationCompleted(CalibrationProfile)
     case validationTrialCompleted(index: Int, target: Point2D, estimate: Point2D, error: Double)
     case validationCompleted(rms: Double, worst: Double, accepted: Bool)
@@ -122,6 +131,7 @@ public struct CalibrationEngine: Sendable {
     public let plan: CalibrationPlan
     public let profileKey: CalibrationProfileKey
     public let coordinateSpace: CalibrationCoordinateSpace
+    public let screenSizeMeters: PhysicalSize2D?
     public let minimumConfidence: Double
     public private(set) var state: CalibrationEngineState
 
@@ -129,15 +139,19 @@ public struct CalibrationEngine: Sendable {
     private var targetStartedAt: TimeInterval?
     private var lastTimestamp: TimeInterval?
     private var samples: [Point2D] = []
+    private var targetRays: [GazeRay3D] = []
     private var targetGeometries: [GazeGeometrySample] = []
     private var allCalibrationGeometries: [GazeGeometrySample] = []
     private var observationsByIndex: [Int: AffineObservation] = [:]
+    private var raySamplesByIndex: [Int: [GazeRay3D]] = [:]
     private var dispersionsByIndex: [Int: Double] = [:]
     private var totalCalibrationSamples = 0
     private var totalRejectedSamples = 0
     private var candidateReport: CalibrationReport?
     private var candidateProfile: CalibrationProfile?
     private var validationErrors: [Double] = []
+    private var candidateProfiles: [CalibrationModelSelection: CalibrationProfile] = [:]
+    private var validationErrorsByModel: [CalibrationModelSelection: [Double]] = [:]
     private var selectiveRetriesUsed = 0
     private var isSelectiveRetry = false
     private var expectedSourceSessionID: UUID?
@@ -149,12 +163,14 @@ public struct CalibrationEngine: Sendable {
         plan: CalibrationPlan = .standard,
         profileKey: CalibrationProfileKey = CalibrationProfileKey(sourceID: "", displayID: "", setupID: ""),
         coordinateSpace: CalibrationCoordinateSpace = .source,
+        screenSizeMeters: PhysicalSize2D? = nil,
         minimumConfidence: Double = 0.5,
         wallClock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.plan = plan
         self.profileKey = profileKey
         self.coordinateSpace = coordinateSpace
+        self.screenSizeMeters = screenSizeMeters?.isValid == true ? screenSizeMeters : nil
         self.minimumConfidence = minimumConfidence.isFinite ? min(1, max(0, minimumConfidence)) : 0.5
         self.wallClock = wallClock
         self.state = CalibrationEngineState(plan: plan)
@@ -163,6 +179,7 @@ public struct CalibrationEngine: Sendable {
     public init(
         plan: CalibrationPlan = .standard,
         profile: CalibrationProfile,
+        screenSizeMeters: PhysicalSize2D? = nil,
         minimumConfidence: Double = 0.5,
         wallClock: @escaping @Sendable () -> Date = { Date() }
     ) throws {
@@ -170,6 +187,7 @@ public struct CalibrationEngine: Sendable {
             plan: plan,
             profileKey: profile.key,
             coordinateSpace: profile.coordinateSpace,
+            screenSizeMeters: screenSizeMeters,
             minimumConfidence: minimumConfidence,
             wallClock: wallClock
         )
@@ -261,7 +279,7 @@ public struct CalibrationEngine: Sendable {
 
     @discardableResult
     public mutating func consume(_ point: Point2D, at timestamp: TimeInterval) throws -> [CalibrationEngineEvent] {
-        try consumeAccepted(point, geometry: nil, at: timestamp)
+        try consumeAccepted(point, gazeRay: nil, geometry: nil, at: timestamp)
     }
 
     @discardableResult
@@ -334,7 +352,13 @@ public struct CalibrationEngine: Sendable {
             }
         }
 
-        return try consumeAccepted(frame.point, geometry: frame.trackingMetrics?.geometry, at: timestamp, timestampAlreadySet: true)
+        return try consumeAccepted(
+            frame.point,
+            gazeRay: frame.gazeRay,
+            geometry: frame.trackingMetrics?.geometry,
+            at: timestamp,
+            timestampAlreadySet: true
+        )
     }
 
     @discardableResult
@@ -372,6 +396,7 @@ public struct CalibrationEngine: Sendable {
 
     private mutating func consumeAccepted(
         _ point: Point2D,
+        gazeRay: GazeRay3D?,
         geometry: GazeGeometrySample?,
         at timestamp: TimeInterval,
         timestampAlreadySet: Bool = false
@@ -390,16 +415,19 @@ public struct CalibrationEngine: Sendable {
         let collectedPoint: Point2D
         switch state.mode {
         case .validation:
-            guard let candidateProfile else { return [] }
-            collectedPoint = candidateProfile.apply(to: point)
+            // Keep the raw 2D evidence here. Both candidate families are
+            // scored from this same target window in `finishTarget`.
+            collectedPoint = point
         case .evaluation:
             guard let profile = state.profile else { return [] }
-            collectedPoint = profile.apply(to: point)
+            guard let mapped = profile.apply(to: point, gazeRay: gazeRay) else { return [] }
+            collectedPoint = mapped
         case .calibration, .recenter, .none:
             collectedPoint = point
         }
 
         samples.append(collectedPoint)
+        if let gazeRay = gazeRay?.normalized { targetRays.append(gazeRay) }
         if let geometry, geometry.isFinite {
             targetGeometries.append(geometry)
             if state.mode == .calibration { allCalibrationGeometries.append(geometry) }
@@ -433,9 +461,13 @@ public struct CalibrationEngine: Sendable {
 
     private mutating func finishTarget(target: Point2D, at timestamp: TimeInterval) throws -> [CalibrationEngineEvent] {
         guard let mode = state.mode else { return [] }
-        let representative = median(of: samples)
+        let capturedPoints = samples
+        let capturedRays = targetRays
+        let representative = median(of: capturedPoints)
+        let representativeRay = medianRay(capturedRays)
         let dispersion = currentDispersion() ?? 0
         samples.removeAll(keepingCapacity: true)
+        targetRays.removeAll(keepingCapacity: true)
         targetGeometries.removeAll(keepingCapacity: true)
         state.sampleCount = 0
         state.targetProgress = 0
@@ -445,6 +477,7 @@ public struct CalibrationEngine: Sendable {
         switch mode {
         case .calibration:
             observationsByIndex[state.targetIndex] = AffineObservation(input: representative, output: target)
+            if !capturedRays.isEmpty { raySamplesByIndex[state.targetIndex] = capturedRays }
             dispersionsByIndex[state.targetIndex] = dispersion
 
             if !isSelectiveRetry, state.targetIndex + 1 < plan.targets.count {
@@ -454,32 +487,83 @@ public struct CalibrationEngine: Sendable {
             return try fitCandidateAndContinue(at: timestamp)
 
         case .validation:
-            guard let candidateProfile else { return [] }
-            let estimate = representative
-            let error = pointDistance(estimate, target)
+            guard !candidateProfiles.isEmpty else { return [] }
             let completedIndex = state.trialIndex
-            validationErrors.append(error)
+            var trialResults: [(CalibrationModelSelection, Point2D, Double)] = []
+            for (model, profile) in candidateProfiles {
+                let mapped: [Point2D]
+                switch model {
+                case .legacy2D:
+                    mapped = capturedPoints.compactMap { profile.apply(to: $0, gazeRay: nil) }
+                case .rayPlane3D:
+                    mapped = capturedRays.compactMap { profile.apply(to: representative, gazeRay: $0) }
+                }
+                guard mapped.count >= max(3, plan.timing.minimumSamplesPerTarget / 2) else { continue }
+                let estimate = median(of: mapped)
+                let error = pointDistance(estimate, target)
+                validationErrorsByModel[model, default: []].append(error)
+                trialResults.append((model, estimate, error))
+            }
+            guard let displayed = trialResults.min(by: { $0.2 < $1.2 }) else { return [] }
             state.trialIndex += 1
             var events: [CalibrationEngineEvent] = [
-                .validationTrialCompleted(index: completedIndex, target: target, estimate: estimate, error: error)
+                .validationTrialCompleted(
+                    index: completedIndex,
+                    target: target,
+                    estimate: displayed.1,
+                    error: displayed.2
+                )
             ]
             if state.trialIndex < plan.evaluationTargets.count {
                 events.append(startTarget(mode: .validation, index: state.trialIndex, at: timestamp, resetRetry: true))
                 return events
             }
 
-            let rms = rootMeanSquare(validationErrors)
-            let worst = validationErrors.max() ?? .infinity
             let policy = plan.validation!
-            let accepted = rms <= policy.maximumRMSError && worst <= policy.maximumWorstError
-            events.append(.validationCompleted(rms: rms, worst: worst, accepted: accepted))
-            if accepted {
-                events.append(contentsOf: commitCandidate(candidateProfile, validationRMS: rms, validationWorst: worst))
+            let legacy = validationMetrics(for: .legacy2D)
+            let rayPlane = validationMetrics(for: .rayPlane3D)
+            let selected = preferredAcceptedModel(policy: policy)
+            let bestAvailable = selected ?? bestAvailableModel(policy: policy)
+            events.append(.modelComparisonCompleted(
+                legacyRMS: legacy?.rms,
+                legacyWorst: legacy?.worst,
+                rayPlaneRMS: rayPlane?.rms,
+                rayPlaneWorst: rayPlane?.worst,
+                selected: bestAvailable
+            ))
+
+            if let selected,
+               var selectedProfile = candidateProfiles[selected],
+               let selectedMetrics = validationMetrics(for: selected) {
+                selectedProfile.quality.legacyValidationRMSError = legacy?.rms
+                selectedProfile.quality.legacyValidationMaxError = legacy?.worst
+                selectedProfile.quality.rayPlaneValidationRMSError = rayPlane?.rms
+                selectedProfile.quality.rayPlaneValidationMaxError = rayPlane?.worst
+                events.append(.validationCompleted(
+                    rms: selectedMetrics.rms,
+                    worst: selectedMetrics.worst,
+                    accepted: true
+                ))
+                events.append(contentsOf: commitCandidate(
+                    selectedProfile,
+                    validationRMS: selectedMetrics.rms,
+                    validationWorst: selectedMetrics.worst
+                ))
                 return events
             }
 
+            let bestMetrics = bestAvailable.flatMap { validationMetrics(for: $0) }
+                ?? (rms: Double.infinity, worst: Double.infinity)
+            events.append(.validationCompleted(
+                rms: bestMetrics.rms,
+                worst: bestMetrics.worst,
+                accepted: false
+            ))
+
             if selectiveRetriesUsed < policy.maximumSelectiveRetries,
-               let worstIndex = validationErrors.indices.max(by: { validationErrors[$0] < validationErrors[$1] }) {
+               let bestAvailable,
+               let errors = validationErrorsByModel[bestAvailable],
+               let worstIndex = errors.indices.max(by: { errors[$0] < errors[$1] }) {
                 let failedTarget = plan.evaluationTargets[worstIndex]
                 let nearest = plan.targets.indices.min(by: {
                     pointDistance(plan.targets[$0], failedTarget) < pointDistance(plan.targets[$1], failedTarget)
@@ -487,6 +571,7 @@ public struct CalibrationEngine: Sendable {
                 selectiveRetriesUsed += 1
                 isSelectiveRetry = true
                 observationsByIndex.removeValue(forKey: nearest)
+                raySamplesByIndex.removeValue(forKey: nearest)
                 state.phase = .calibrating
                 state.mode = .calibration
                 state.targetCount = plan.targets.count
@@ -497,13 +582,13 @@ public struct CalibrationEngine: Sendable {
             state.phase = .failed
             state.mode = nil
             state.target = nil
-            state.error = .validationFailed(rms: rms, worst: worst)
+            state.error = .validationFailed(rms: bestMetrics.rms, worst: bestMetrics.worst)
             targetStartedAt = nil
             return events
 
         case .recenter:
             guard var profile = state.profile else { return [] }
-            let mapped = profile.apply(to: representative)
+            guard let mapped = profile.apply(to: representative, gazeRay: representativeRay) else { return [] }
             let correction = Point2D(x: target.x - mapped.x, y: target.y - mapped.y)
             profile.fineAdjustment.offsetX += correction.x
             profile.fineAdjustment.offsetY += correction.y
@@ -575,6 +660,7 @@ public struct CalibrationEngine: Sendable {
             selectiveRetriesUsed += 1
             isSelectiveRetry = true
             observationsByIndex.removeValue(forKey: originalIndex)
+            raySamplesByIndex.removeValue(forKey: originalIndex)
             state.phase = .calibrating
             state.mode = .calibration
             return [
@@ -590,10 +676,11 @@ public struct CalibrationEngine: Sendable {
         let affine: AffineTransform2D?
         if case .affine(let transform) = mapping { affine = transform } else { affine = nil }
         let oldProfile = state.profile
-        let profile = CalibrationProfile(
+        let legacyProfile = CalibrationProfile(
             key: profileKey,
             baseTransform: affine,
             mapping: mapping,
+            selectedModel: .legacy2D,
             coordinateSpace: coordinateSpace,
             quality: CalibrationQualitySummary(
                 sampleCount: totalCalibrationSamples,
@@ -611,15 +698,64 @@ public struct CalibrationEngine: Sendable {
             updatedAt: date,
             geometryBaseline: medianGeometry(allCalibrationGeometries)
         )
-        candidateProfile = profile
+        candidateProfile = legacyProfile
+        candidateProfiles = [.legacy2D: legacyProfile]
 
         var events: [CalibrationEngineEvent] = [.candidateFitted(report)]
+        if let screenSizeMeters {
+            let rayObservations = indexed.compactMap { index, _ -> RayScreenTargetObservation? in
+                guard let rays = raySamplesByIndex[index], !rays.isEmpty else { return nil }
+                return RayScreenTargetObservation(target: plan.targets[index], rays: rays)
+            }
+            do {
+                let rayReport = try RayScreenCalibrator.fit(
+                    observations: rayObservations,
+                    screenSize: screenSizeMeters
+                )
+                let rayMagnitudes = rayReport.residuals.map(\.magnitude)
+                let rayMean = rayMagnitudes.isEmpty
+                    ? .infinity
+                    : rayMagnitudes.reduce(0, +) / Double(rayMagnitudes.count)
+                let rayProfile = CalibrationProfile(
+                    key: profileKey,
+                    baseTransform: affine,
+                    mapping: mapping,
+                    rayScreenMapping: rayReport.mapping,
+                    selectedModel: .rayPlane3D,
+                    coordinateSpace: coordinateSpace,
+                    quality: CalibrationQualitySummary(
+                        sampleCount: totalCalibrationSamples,
+                        targetCount: rayReport.residuals.count,
+                        meanError: rayMean,
+                        rmsError: rayReport.rms,
+                        maxError: rayReport.worstMagnitude,
+                        meanTargetDispersion: dispersionsByIndex.isEmpty
+                            ? nil
+                            : dispersionsByIndex.values.reduce(0, +) / Double(dispersionsByIndex.count),
+                        rejectedSampleCount: totalRejectedSamples,
+                        modelName: "ray-plane-3D"
+                    ),
+                    createdAt: oldProfile?.createdAt ?? date,
+                    updatedAt: date,
+                    geometryBaseline: medianGeometry(allCalibrationGeometries)
+                )
+                candidateProfiles[.rayPlane3D] = rayProfile
+                events.append(.rayPlaneCandidateFitted(rayReport))
+            } catch {
+                events.append(.rayPlaneCandidateUnavailable(String(describing: error)))
+            }
+        } else {
+            events.append(.rayPlaneCandidateUnavailable("selected display did not report physical dimensions"))
+        }
+
         guard plan.validation != nil else {
-            events.append(contentsOf: commitCandidate(profile, validationRMS: nil, validationWorst: nil))
+            events.append(contentsOf: commitCandidate(legacyProfile, validationRMS: nil, validationWorst: nil))
             return events
         }
 
         validationErrors.removeAll(keepingCapacity: true)
+        validationErrorsByModel.removeAll(keepingCapacity: true)
+        for model in candidateProfiles.keys { validationErrorsByModel[model] = [] }
         state.phase = .validating
         state.mode = .validation
         state.targetCount = plan.evaluationTargets.count
@@ -628,6 +764,60 @@ public struct CalibrationEngine: Sendable {
         state.evaluationHits = 0
         events.append(startTarget(mode: .validation, index: 0, at: timestamp, resetRetry: true))
         return events
+    }
+
+    private func validationMetrics(
+        for model: CalibrationModelSelection
+    ) -> (rms: Double, worst: Double)? {
+        guard let errors = validationErrorsByModel[model],
+              errors.count == plan.evaluationTargets.count else { return nil }
+        return (rootMeanSquare(errors), errors.max() ?? .infinity)
+    }
+
+    /// Prefer the physical model only when it improves generalization or the
+    /// perimeter/worst point by a meaningful margin. This prevents a more
+    /// complex fit from winning on an insignificant average-only difference.
+    private func preferredAcceptedModel(
+        policy: CalibrationValidationPolicy
+    ) -> CalibrationModelSelection? {
+        let legacy = validationMetrics(for: .legacy2D)
+        let ray = validationMetrics(for: .rayPlane3D)
+        let legacyPasses = legacy.map {
+            $0.rms <= policy.maximumRMSError && $0.worst <= policy.maximumWorstError
+        } ?? false
+        let rayPasses = ray.map {
+            $0.rms <= policy.maximumRMSError && $0.worst <= policy.maximumWorstError
+        } ?? false
+
+        switch (legacyPasses, rayPasses) {
+        case (false, false): return nil
+        case (true, false): return .legacy2D
+        case (false, true): return .rayPlane3D
+        case (true, true):
+            guard let legacy, let ray else { return .legacy2D }
+            let meaningfullyBetterAverage = ray.rms <= legacy.rms * 0.95
+                && ray.worst <= legacy.worst
+            let meaningfullyBetterPerimeter = ray.worst <= legacy.worst * 0.90
+                && ray.rms <= legacy.rms * 1.02
+            return meaningfullyBetterAverage || meaningfullyBetterPerimeter
+                ? .rayPlane3D
+                : .legacy2D
+        }
+    }
+
+    /// Used to choose the failed target to recollect. The max normalized ratio
+    /// makes a bad corner count just as strongly as a bad overall average.
+    private func bestAvailableModel(
+        policy: CalibrationValidationPolicy
+    ) -> CalibrationModelSelection? {
+        candidateProfiles.keys.compactMap { model -> (CalibrationModelSelection, Double)? in
+            guard let metrics = validationMetrics(for: model) else { return nil }
+            let score = max(
+                metrics.rms / policy.maximumRMSError,
+                metrics.worst / policy.maximumWorstError
+            )
+            return (model, score)
+        }.min(by: { $0.1 < $1.1 })?.0
     }
 
     private mutating func commitCandidate(
@@ -640,6 +830,8 @@ public struct CalibrationEngine: Sendable {
         accepted.quality.validationMaxError = validationWorst
         accepted.updatedAt = wallClock()
         candidateProfile = nil
+        candidateProfiles.removeAll(keepingCapacity: true)
+        validationErrorsByModel.removeAll(keepingCapacity: true)
         state.profile = accepted
         state.phase = .calibrated
         state.mode = nil
@@ -657,6 +849,7 @@ public struct CalibrationEngine: Sendable {
         resetRetry: Bool
     ) -> CalibrationEngineEvent {
         samples.removeAll(keepingCapacity: true)
+        targetRays.removeAll(keepingCapacity: true)
         targetGeometries.removeAll(keepingCapacity: true)
         state.mode = mode
         state.targetIndex = index
@@ -761,15 +954,19 @@ public struct CalibrationEngine: Sendable {
 
     private mutating func clearRunData() {
         samples.removeAll(keepingCapacity: true)
+        targetRays.removeAll(keepingCapacity: true)
         targetGeometries.removeAll(keepingCapacity: true)
         allCalibrationGeometries.removeAll(keepingCapacity: true)
         observationsByIndex.removeAll(keepingCapacity: true)
+        raySamplesByIndex.removeAll(keepingCapacity: true)
         dispersionsByIndex.removeAll(keepingCapacity: true)
         validationErrors.removeAll(keepingCapacity: true)
         totalCalibrationSamples = 0
         totalRejectedSamples = 0
         candidateReport = nil
         candidateProfile = nil
+        candidateProfiles.removeAll(keepingCapacity: true)
+        validationErrorsByModel.removeAll(keepingCapacity: true)
         selectiveRetriesUsed = 0
         isSelectiveRetry = false
         expectedSourceSessionID = nil
@@ -795,6 +992,22 @@ public struct CalibrationEngine: Sendable {
 
     private func median(of points: [Point2D]) -> Point2D {
         Point2D(x: scalarMedian(points.map(\.x)), y: scalarMedian(points.map(\.y)))
+    }
+
+    private func medianRay(_ rays: [GazeRay3D]) -> GazeRay3D? {
+        guard !rays.isEmpty else { return nil }
+        return GazeRay3D(
+            origin: Vector3(
+                x: scalarMedian(rays.map(\.origin.x)),
+                y: scalarMedian(rays.map(\.origin.y)),
+                z: scalarMedian(rays.map(\.origin.z))
+            ),
+            direction: Vector3(
+                x: scalarMedian(rays.map(\.direction.x)),
+                y: scalarMedian(rays.map(\.direction.y)),
+                z: scalarMedian(rays.map(\.direction.z))
+            )
+        ).normalized
     }
 
     private func medianGeometry(_ values: [GazeGeometrySample]) -> GazeGeometrySample? {

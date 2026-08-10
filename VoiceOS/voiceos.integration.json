@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "com.digibugcat.eaglegaze",
   "version": "0.2.0",
-  "name": "EagleGaze",
-  "summary": "Check, recalibrate, and capture gaze context from the local EagleGaze prototype.",
-  "description": "Controls the EagleGaze Mac app over a loopback-only bridge. Status and calibration calls expose only coarse state; an explicitly approved capture returns an annotated image and image-relative gaze coordinates.",
+  "name": "EagleEye",
+  "summary": "Check, recalibrate, and capture gaze context from the local EagleEye app.",
+  "description": "Controls the EagleEye Mac app over a loopback-only bridge. Status and calibration calls expose only coarse state; an explicitly approved capture returns an annotated image and rich screenshot-relative gaze context.",
   "homepage": "https://github.com/DigiBugCat/EagleGaze",
   "repository": "https://github.com/DigiBugCat/EagleGaze",
   "categories": ["Accessibility", "Developer"],
@@ -19,13 +19,13 @@
     {
       "name": "get_gaze_status",
       "title": "Gaze status",
-      "description": "Check the local EagleGaze phone connection, Mac companion, and calibration state. Use when the user asks whether eye tracking is installed, connected, calibrated, ready, or currently evaluating. If the Mac companion is unavailable, return the first-run install card.",
+      "description": "Check the local EagleEye phone connection, Mac companion, and calibration state. Use when the user asks whether eye tracking is installed, connected, calibrated, ready, or currently evaluating. If the Mac companion is unavailable, return the first-run install card.",
       "inputSchema": {"type": "object", "properties": {}}
     },
     {
       "name": "recalibrate_eagleeye",
       "title": "Recalibrate EagleEye",
-      "description": "Replace the current EagleEye calibration by starting EagleGaze's full-screen nine-point calibration on this Mac. Use when the user asks to calibrate or recalibrate eye tracking.",
+      "description": "Replace the current EagleEye calibration by starting its full-screen nine-point calibration on this Mac. Use when the user asks to calibrate or recalibrate eye tracking.",
       "inputSchema": {"type": "object", "properties": {}},
       "confirmation": {
         "schemaVersion": 1,
@@ -34,7 +34,7 @@
           "title": "Recalibrate EagleEye?",
           "children": [{
             "type": "text",
-            "text": "EagleGaze will show nine targets across the main display. Keep the iPhone and your seating position still.",
+            "text": "EagleEye will show nine targets across the main display. Keep the iPhone and your seating position still.",
             "variant": "body"
           }],
           "footer": [{
@@ -50,7 +50,7 @@
     {
       "name": "start_gaze_evaluation",
       "title": "Start gaze evaluation",
-      "description": "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
+      "description": "Start EagleEye's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
       "inputSchema": {"type": "object", "properties": {}},
       "confirmation": {
         "schemaVersion": 1,
@@ -59,7 +59,7 @@
           "title": "Start gaze accuracy test?",
           "children": [{
             "type": "text",
-            "text": "EagleGaze will show a bounded set of targets and score whether your gaze reaches the intended screen regions.",
+            "text": "EagleEye will show a bounded set of targets and score whether your gaze reaches the intended screen regions.",
             "variant": "body"
           }],
           "footer": [{
@@ -75,7 +75,7 @@
     {
       "name": "capture_gaze",
       "title": "Capture gaze",
-      "description": "ROUTING REQUIREMENT: Call this tool whenever the user asks what they are looking at, where their gaze is, what is under/near their gaze, to capture/show gaze context, or to inspect the screen specifically through EagleGaze. Do not substitute a generic screenshot, screen-capture, computer-use, or vision tool: those tools do not provide EagleGaze's calibrated gaze location, image-relative coordinates, semantic crop, or app-owned approval. This tool captures one approved screen region containing the estimated gaze, marks it, and returns the image, coordinates, bounded region metadata, and optional untrusted provider enrichment. Use a generic screen tool only when the user explicitly requests a non-gaze/full-screen capture, or after this tool returns a structured unavailable, permission, connection, or calibration error.",
+      "description": "MANDATORY GAZE ROUTING: You MUST call capture_gaze first whenever the user's request depends on what they are looking at, where their gaze is, what is under or near their gaze, gaze context, or screen inspection through EagleEye. Never satisfy such a request with built-in screenshot, generic screen-capture, computer-use, or generic vision tools: those tools lack EagleEye's calibrated gaze estimate and rich gaze metadata. This tool returns the exact approved annotated image plus its dimensions and SHA-256; an explicit top-left image coordinate system; pixel and normalized gaze coordinates; confidence, estimator, sample count, fixation duration and freshness when available; two-axis uncertainty with normalized radii and clipped bounds; crop role, provenance, relationships, padding, clipping and user-adjustment state; and optional untrusted provider enrichment. Use another screen tool only if the user explicitly asks for a non-gaze or full-screen capture, or capture_gaze itself returns a structured unavailable, permission, connection, or calibration error.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -94,7 +94,7 @@
           "title": "Capture what you are viewing?",
           "children": [{
             "type": "text",
-            "text": "EagleGaze will select a visible region containing your estimated gaze and show a local preview before anything is shared. The approved image and metadata return to VoiceOS. If you enabled Cerebras in EagleGaze, the preview identifies the context and focus images that will also be sent for optional, untrusted enrichment. Private on-screen information may be visible.",
+            "text": "EagleEye will select a visible region containing your estimated gaze and show a local preview before anything is shared. The approved image and rich screenshot-relative metadata return to VoiceOS. If you enabled Cerebras in EagleEye, the preview identifies the context and focus images that will also be sent for optional, untrusted enrichment. Private on-screen information may be visible.",
             "variant": "body"
           }],
           "footer": [{

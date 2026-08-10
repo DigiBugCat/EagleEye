@@ -1,12 +1,28 @@
 import AppKit
 import Combine
 import Foundation
+import GazeCore
 
 struct DisplayDescriptor: Identifiable, Equatable {
     let id: String
     let name: String
     let frame: CGRect
     let isMain: Bool
+    let physicalSize: PhysicalSize2D?
+
+    init(
+        id: String,
+        name: String,
+        frame: CGRect,
+        isMain: Bool,
+        physicalSize: PhysicalSize2D? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.frame = frame
+        self.isMain = isMain
+        self.physicalSize = physicalSize
+    }
 }
 
 /// Supplies the display topology used by calibration and overlay rendering.
@@ -58,11 +74,20 @@ final class DisplayProvider: ObservableObject {
         NSScreen.screens.enumerated().map { index, screen in
             let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
             let id = number.map { "display-\($0.uint32Value)" } ?? "display-\(index)"
+            let millimeters = number.map { CGDisplayScreenSize($0.uint32Value) }
+            let physicalSize = millimeters.flatMap { size -> PhysicalSize2D? in
+                let value = PhysicalSize2D(
+                    widthMeters: size.width / 1_000,
+                    heightMeters: size.height / 1_000
+                )
+                return value.isValid ? value : nil
+            }
             return DisplayDescriptor(
                 id: id,
                 name: screen.localizedName.isEmpty ? "Display \(index + 1)" : screen.localizedName,
                 frame: screen.frame,
-                isMain: screen == NSScreen.main
+                isMain: screen == NSScreen.main,
+                physicalSize: physicalSize
             )
         }
     }

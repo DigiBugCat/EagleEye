@@ -38,9 +38,10 @@ Before approval, the image exists in memory only. EagleGazeMac does not save it
 to disk, add metadata such as window titles or application names, log its bytes,
 or retain it after approve, reject, timeout, disconnect, or failure. The result
 may include gaze coordinates only relative to the returned image, with a
-top-left origin and optional uncertainty radius. It does not include absolute
-screen coordinates, display identifiers, calibration transforms, or raw gaze
-samples.
+top-left origin, two-axis uncertainty bounds, and bounded aggregate fixation
+evidence such as confidence, sample count, coverage duration, and newest-sample
+age. It does not include individual samples, absolute screen coordinates,
+display identifiers, calibration transforms, or raw gaze samples.
 
 Smart crop selection is local. With Accessibility permission, EagleGaze reads a
 bounded chain of roles and rectangles around the gaze point plus a small

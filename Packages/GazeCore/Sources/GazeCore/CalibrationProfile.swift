@@ -42,6 +42,13 @@ public enum CalibrationProfileValidationError: Error, Equatable, Sendable {
 /// the coordinate-space definition.
 public typealias CalibrationCoordinateSpace = GazeCoordinateSpace
 
+/// The model family selected by independent validation. `nil` on older
+/// profiles means the legacy 2D mapping.
+public enum CalibrationModelSelection: String, Codable, Equatable, Hashable, Sendable {
+    case legacy2D
+    case rayPlane3D
+}
+
 /// A small post-affine correction. Scaling is deliberately center-relative;
 /// this means changing scale does not move the display center.
 public struct FineAdjustment: Codable, Equatable, Sendable {
@@ -109,6 +116,10 @@ public struct CalibrationQualitySummary: Codable, Equatable, Sendable {
     public var meanTargetDispersion: Double?
     public var rejectedSampleCount: Int?
     public var modelName: String?
+    public var legacyValidationRMSError: Double?
+    public var legacyValidationMaxError: Double?
+    public var rayPlaneValidationRMSError: Double?
+    public var rayPlaneValidationMaxError: Double?
 
     public init(
         sampleCount: Int = 0,
@@ -120,7 +131,11 @@ public struct CalibrationQualitySummary: Codable, Equatable, Sendable {
         validationMaxError: Double? = nil,
         meanTargetDispersion: Double? = nil,
         rejectedSampleCount: Int? = nil,
-        modelName: String? = nil
+        modelName: String? = nil,
+        legacyValidationRMSError: Double? = nil,
+        legacyValidationMaxError: Double? = nil,
+        rayPlaneValidationRMSError: Double? = nil,
+        rayPlaneValidationMaxError: Double? = nil
     ) {
         self.sampleCount = sampleCount
         self.targetCount = targetCount
@@ -132,6 +147,10 @@ public struct CalibrationQualitySummary: Codable, Equatable, Sendable {
         self.meanTargetDispersion = meanTargetDispersion
         self.rejectedSampleCount = rejectedSampleCount
         self.modelName = modelName
+        self.legacyValidationRMSError = legacyValidationRMSError
+        self.legacyValidationMaxError = legacyValidationMaxError
+        self.rayPlaneValidationRMSError = rayPlaneValidationRMSError
+        self.rayPlaneValidationMaxError = rayPlaneValidationMaxError
     }
 
     public static let empty = CalibrationQualitySummary()
@@ -141,6 +160,10 @@ public struct CalibrationQualitySummary: Codable, Equatable, Sendable {
             && (validationRMSError?.isFinite ?? true)
             && (validationMaxError?.isFinite ?? true)
             && (meanTargetDispersion?.isFinite ?? true)
+            && (legacyValidationRMSError?.isFinite ?? true)
+            && (legacyValidationMaxError?.isFinite ?? true)
+            && (rayPlaneValidationRMSError?.isFinite ?? true)
+            && (rayPlaneValidationMaxError?.isFinite ?? true)
     }
 
     public var isValid: Bool {
@@ -187,6 +210,11 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
     /// for affine candidates so version-1 readers and stored profiles continue
     /// to work during migration.
     public var mapping: GazeMapping?
+    /// Optional geometry-aware candidate. It is used only when
+    /// `selectedModel == .rayPlane3D`; legacy profiles decode with both fields
+    /// absent and continue to use `mapping`/`baseTransform`.
+    public var rayScreenMapping: RayScreenMapping?
+    public var selectedModel: CalibrationModelSelection?
     public var fineAdjustment: FineAdjustment
     public var coordinateSpace: CalibrationCoordinateSpace
     public var quality: CalibrationQualitySummary
@@ -199,6 +227,8 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         key: CalibrationProfileKey,
         baseTransform: AffineTransform2D? = nil,
         mapping: GazeMapping? = nil,
+        rayScreenMapping: RayScreenMapping? = nil,
+        selectedModel: CalibrationModelSelection? = nil,
         fineAdjustment: FineAdjustment = .identity,
         coordinateSpace: CalibrationCoordinateSpace = .source,
         quality: CalibrationQualitySummary = .empty,
@@ -210,6 +240,8 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         self.key = key
         self.baseTransform = baseTransform
         self.mapping = mapping
+        self.rayScreenMapping = rayScreenMapping
+        self.selectedModel = selectedModel
         self.fineAdjustment = fineAdjustment
         self.coordinateSpace = coordinateSpace
         self.quality = quality
@@ -236,6 +268,34 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
     public func apply(to point: Point2D, center: Point2D = Point2D(x: 0.5, y: 0.5)) -> Point2D {
         let mapped = mapping?.apply(to: point) ?? baseTransform?.apply(to: point) ?? point
         return fineAdjustment.apply(to: mapped, around: center)
+    }
+
+    /// Applies the independently selected model to a complete observation.
+    /// A ray-plane profile deliberately returns nil when a full ray is absent
+    /// or cannot intersect the learned plane; silently falling back to 2D here
+    /// would make 3D validation scores dishonest.
+    public func apply(
+        to point: Point2D,
+        gazeRay: GazeRay3D?,
+        center: Point2D = Point2D(x: 0.5, y: 0.5)
+    ) -> Point2D? {
+        let mapped: Point2D
+        switch selectedModel ?? .legacy2D {
+        case .legacy2D:
+            mapped = mapping?.apply(to: point) ?? baseTransform?.apply(to: point) ?? point
+        case .rayPlane3D:
+            guard let gazeRay,
+                  let mappedRay = rayScreenMapping?.apply(to: gazeRay) else { return nil }
+            mapped = mappedRay
+        }
+        return fineAdjustment.apply(to: mapped, around: center)
+    }
+
+    public func apply(
+        to frame: CanonicalGazeFrame,
+        center: Point2D = Point2D(x: 0.5, y: 0.5)
+    ) -> Point2D? {
+        apply(to: frame.point, gazeRay: frame.gazeRay, center: center)
     }
 
     public func mappedPoint(from point: Point2D, center: Point2D = Point2D(x: 0.5, y: 0.5)) -> Point2D {
@@ -277,6 +337,12 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
             guard probes.allSatisfy({ mapping.apply(to: $0) != nil }) else {
                 throw CalibrationProfileValidationError.nonFiniteMapping
             }
+        }
+        if let rayScreenMapping, !rayScreenMapping.isValid {
+            throw CalibrationProfileValidationError.nonFiniteMapping
+        }
+        if selectedModel == .rayPlane3D, rayScreenMapping == nil {
+            throw CalibrationProfileValidationError.nonFiniteMapping
         }
         if let geometryBaseline, !geometryBaseline.isFinite {
             throw CalibrationProfileValidationError.nonFiniteMapping

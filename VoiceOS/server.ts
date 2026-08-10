@@ -106,12 +106,35 @@ const GazeCoordinatesSchema = z.object({
   uncertaintyRadius: z.number().finite().nonnegative(),
 }).strict();
 
+const CaptureAttentionSchema = z.object({
+  estimator: z.enum(["rolling_fixation", "mapped_point_fallback"]),
+  confidence: z.number().finite().min(0).max(1).optional(),
+  sampleCount: z.number().int().nonnegative().max(512).optional(),
+  fixationDurationMilliseconds: z.number().int().nonnegative().max(2_000).optional(),
+  newestSampleAgeMilliseconds: z.number().int().nonnegative().max(2_000).optional(),
+  uncertainty: z.object({
+    radiusX: z.number().int().nonnegative(),
+    radiusY: z.number().int().nonnegative(),
+    normalizedRadiusX: z.number().finite().min(0).max(1),
+    normalizedRadiusY: z.number().finite().min(0).max(1),
+    bounds: z.object({
+      x: z.number().int().nonnegative(),
+      y: z.number().int().nonnegative(),
+      width: z.number().int().nonnegative(),
+      height: z.number().int().nonnegative(),
+    }).strict(),
+  }).strict(),
+}).strict();
+
 const CaptureRegionSchema = z.object({
   kind: z.enum(["text", "control", "controlGroup", "image", "chart", "tableCell", "tableRow", "table", "dialog", "panel", "window", "unknown"]),
   resolvedBy: z.enum(["explicitApplicationRegion", "accessibility", "segmentation", "fixedContextFallback", "userAdjusted"]),
   confidence: z.number().finite().min(0).max(1),
   fallbackUsed: z.boolean(),
   topmostAtGaze: z.boolean().optional(),
+  userAdjusted: z.boolean().optional(),
+  partiallyClipped: z.boolean().optional(),
+  paddingPercent: z.number().finite().min(0).max(100).optional(),
   includedRelationships: z.array(z.enum(["title", "header", "label", "linkedElement"])).max(4),
 }).strict();
 
@@ -141,12 +164,17 @@ const CaptureResultSchema = z.object({
   marker: z.enum(["circle", "square"]),
   capturedAt: z.string().datetime({ offset: true }),
   gaze: GazeCoordinatesSchema,
+  attention: CaptureAttentionSchema.optional(),
   region: CaptureRegionSchema.optional(),
   enrichment: CaptureEnrichmentSchema.optional(),
   enrichmentWarning: z.string().max(500).optional(),
 }).strict().superRefine((value, context) => {
   if (value.gaze.x >= value.width || value.gaze.y >= value.height) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Gaze point falls outside the returned image." });
+  }
+  const bounds = value.attention?.uncertainty.bounds;
+  if (bounds && (bounds.x + bounds.width > value.width || bounds.y + bounds.height > value.height)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Attention bounds fall outside the returned image." });
   }
 });
 
@@ -587,7 +615,7 @@ function statusCard(snapshot: BridgeSnapshot) {
   return glanceResult([
     {
       type: "header",
-      title: "EagleGaze",
+      title: "EagleEye",
       icon: "sparkle",
       trailing: snapshot.phoneConnected ? "Phone connected" : "Phone offline",
     },
@@ -610,7 +638,7 @@ function companionSetupWidget() {
 .card{height:184px;padding:16px;border:1px solid var(--line);border-radius:18px;overflow:hidden}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 h1{margin:7px 0 4px;font-size:22px;line-height:27px;letter-spacing:-.02em}.copy{color:var(--muted);max-width:440px}.steps{display:flex;gap:8px;margin-top:14px}.step{flex:1;padding:8px 10px;border-radius:10px;background:var(--fill);font-size:12px}.n{font-weight:750;color:var(--accent);margin-right:5px}
 a{display:inline-block;margin-top:12px;color:var(--accent);font-weight:650;text-decoration:none}a:focus{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
-</style></head><body><div class="card"><div class="eyebrow">One-time Mac setup</div><h1>Install or open EagleGaze</h1><div class="copy">The VoiceOS adapter is ready. Its signed Mac companion provides the calibration window and receives gaze data from your iPhone.</div><div class="steps"><div class="step"><span class="n">1</span>Install the Mac app</div><div class="step"><span class="n">2</span>Open it once</div></div><a href="${COMPANION_DOWNLOAD_URL}">Get EagleGaze for Mac →</a></div><script>
+</style></head><body><div class="card"><div class="eyebrow">One-time Mac setup</div><h1>Install or open EagleEye</h1><div class="copy">The VoiceOS adapter is ready. Its signed Mac companion provides the calibration window and receives gaze data from your iPhone.</div><div class="steps"><div class="step"><span class="n">1</span>Install the Mac app</div><div class="step"><span class="n">2</span>Open it once</div></div><a href="${COMPANION_DOWNLOAD_URL}">Get EagleEye for Mac →</a></div><script>
 var send=function(m){try{parent.postMessage(m,'*')}catch(e){}};
 document.addEventListener('click',function(e){var el=e.target;while(el&&el!==document.body){if(el.tagName==='A'){e.preventDefault();var url=el.getAttribute('href')||'';if(/^https:\/\//i.test(url))send({type:'voiceos:openUrl',url:url});return}el=el.parentNode}});
 send({type:'voiceos:resize',height:184});
@@ -627,8 +655,8 @@ function companionSetupResult(error: CompanionUnavailableError) {
       bundleIdentifier: COMPANION_BUNDLE_ID,
       downloadURL: COMPANION_DOWNLOAD_URL,
       nextSteps: [
-        "Install the signed EagleGaze Mac companion from the release page.",
-        "Open EagleGazeMac once, then ask VoiceOS to check EagleGaze again.",
+        "Install the signed EagleEye Mac companion from the release page.",
+        "Open EagleEye once, then ask VoiceOS to check EagleEye again.",
       ],
     },
     diagnostic: error.message,
@@ -684,14 +712,40 @@ async function runCapture(marker: "circle" | "square") {
           type: "text" as const,
           text: JSON.stringify({
             coordinateSpace: "image_pixels",
-            image: { width: metadata.width, height: metadata.height },
+            coordinateSystem: {
+              id: "returned_image_top_left",
+              origin: "top_left",
+              xAxis: "right",
+              yAxis: "down",
+              pixelUnits: true,
+              normalizedRange: [0, 1],
+            },
+            image: {
+              kind: metadata.kind,
+              mimeType: metadata.mimeType,
+              width: metadata.width,
+              height: metadata.height,
+              sha256: metadata.sha256,
+              target: metadata.target,
+              scope: metadata.scope,
+            },
             gaze: metadata.gaze,
+            attention: metadata.attention,
             marker: metadata.marker,
             scope: metadata.scope,
             capturedAt: metadata.capturedAt,
             region: metadata.region,
             enrichment: metadata.enrichment,
             enrichmentWarning: metadata.enrichmentWarning,
+            enrichmentStatus: metadata.enrichment
+              ? "succeeded"
+              : metadata.enrichmentWarning ? "failed" : "disabled",
+            privacy: {
+              coordinatesAreImageRelative: true,
+              globalCoordinatesIncluded: false,
+              rawGazeSamplesIncluded: false,
+              continuousTrackingIncluded: false,
+            },
           }),
         },
       ],
@@ -711,7 +765,7 @@ server.registerTool(
   {
     title: "Gaze status",
     description:
-      "Check the local EagleGaze phone connection, Mac companion, and calibration state. Use when the user asks whether eye tracking is installed, connected, calibrated, ready, or currently evaluating. If the Mac companion is unavailable, return the first-run install card.",
+      "Check the local EagleEye phone connection, Mac companion, and calibration state. Use when the user asks whether eye tracking is installed, connected, calibrated, ready, or currently evaluating. If the Mac companion is unavailable, return the first-run install card.",
     inputSchema: {},
   },
   async () => await run("status"),
@@ -722,7 +776,7 @@ server.registerTool(
   {
     title: "Recalibrate EagleEye",
     description:
-      "Replace the current EagleEye calibration by starting EagleGaze's full-screen nine-point calibration on this Mac. Use when the user asks to calibrate or recalibrate eye tracking.",
+      "Replace the current EagleEye calibration by starting its full-screen nine-point calibration on this Mac. Use when the user asks to calibrate or recalibrate eye tracking.",
     inputSchema: {},
   },
   async () => await runControlTool("recalibrate_eagleeye"),
@@ -733,7 +787,7 @@ server.registerTool(
   {
     title: "Start gaze evaluation",
     description:
-      "Start EagleGaze's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
+      "Start EagleEye's bounded accuracy evaluation using the current calibration. Use when the user asks to test or score eye-tracking accuracy.",
     inputSchema: {},
   },
   async () => process.env.EAGLEGAZE_ENABLE_EVALUATION === "1"
@@ -750,7 +804,7 @@ server.registerTool(
   {
     title: "Capture gaze",
     description:
-      "ROUTING REQUIREMENT: Call this tool whenever the user asks what they are looking at, where their gaze is, what is under/near their gaze, to capture/show gaze context, or to inspect the screen specifically through EagleGaze. Do not substitute a generic screenshot, screen-capture, computer-use, or vision tool: those tools do not provide EagleGaze's calibrated gaze location, image-relative coordinates, semantic crop, or app-owned approval. This tool captures one approved screen region containing the estimated gaze, marks it, and returns the image, coordinates, bounded region metadata, and optional untrusted provider enrichment. Use a generic screen tool only when the user explicitly requests a non-gaze/full-screen capture, or after this tool returns a structured unavailable, permission, connection, or calibration error.",
+      "MANDATORY GAZE ROUTING: You MUST call capture_gaze first whenever the user's request depends on what they are looking at, where their gaze is, what is under or near their gaze, gaze context, or screen inspection through EagleEye. Never satisfy such a request with built-in screenshot, generic screen-capture, computer-use, or generic vision tools: those tools lack EagleEye's calibrated gaze estimate and rich gaze metadata. This tool returns the exact approved annotated image plus its dimensions and SHA-256; an explicit top-left image coordinate system; pixel and normalized gaze coordinates; confidence, estimator, sample count, fixation duration and freshness when available; two-axis uncertainty with normalized radii and clipped bounds; crop role, provenance, relationships, padding, clipping and user-adjustment state; and optional untrusted provider enrichment. Use another screen tool only if the user explicitly asks for a non-gaze or full-screen capture, or capture_gaze itself returns a structured unavailable, permission, connection, or calibration error.",
     inputSchema: {
       marker: z.enum(["circle", "square"]).optional().default("circle")
         .describe("Shape drawn around the estimated gaze location."),

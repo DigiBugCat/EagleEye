@@ -1,4 +1,4 @@
-# EagleGaze for VoiceOS
+# EagleEye for VoiceOS
 
 This folder is a VoiceOS developer-preview integration. VoiceOS launches
 `run.sh` as a local MCP server over stdio; the Studio-compatible launcher finds
@@ -7,16 +7,16 @@ fallback. Dependencies are an install-time contract: the launcher never runs
 `bun install`, `npm install`, or `npx` and never fetches unpinned code at
 runtime. Run `bun install --frozen-lockfile` once when packaging or developing
 the integration. TypeScript talks to the running
-EagleGaze Mac app through a loopback-only bridge on `127.0.0.1:47474`.
+EagleEye Mac app through a loopback-only bridge on `127.0.0.1:47474`.
 
 ## First-run install
 
 1. Install the EagleGaze integration from its VoiceOS share link, or use
    **Settings → Agent Mode → Integrations → Install from folder** during
    development.
-2. Ask “Is EagleGaze ready?”
+2. Ask “Is EagleEye ready?”
 3. If the Mac companion is not reachable, VoiceOS shows a one-time setup card.
-   Select **Get EagleGaze for Mac**, install the signed release, and open it.
+   Select **Get EagleEye for Mac**, install the signed release, and open it.
 4. Ask VoiceOS to check again, then start calibration.
 
 The integration does not silently download or execute software. The setup card
@@ -79,8 +79,9 @@ gaze packet. It intentionally does not expose the phone's user-assigned name.
   screen coordinates, and continuous gaze. After an EagleGazeMac-owned preview
   and per-capture approval, `capture_gaze` may return one annotated semantic or
   fallback region, coordinates relative only to that returned image, bounded
-  region metadata, and optional provider enrichment explicitly marked as
-  external and untrusted.
+  fixation/uncertainty and region-selection metadata, image identity and hash,
+  explicit coordinate-system semantics, and optional provider enrichment
+  explicitly marked as external and untrusted.
 - When the Mac companion cannot be reached, the adapter returns an install/open
   card with a user-selected HTTPS link. It performs no download, installation,
   shell command, or application launch itself.

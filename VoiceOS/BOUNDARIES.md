@@ -51,6 +51,13 @@ a design change, not a small implementation detail.
   returned image's coordinate space: top-left origin, X increasing right, and Y
   increasing down. Pixel coordinates, normalized image coordinates, and an
   image-relative uncertainty radius are allowed.
+- The result also carries the returned image's media type, dimensions, digest,
+  target and scope; an explicit coordinate-system descriptor; horizontal and
+  vertical uncertainty radii plus clipped image-relative bounds; and bounded
+  fixation evidence consisting of estimator kind, confidence, sample count,
+  coverage duration, and newest-sample age. Region metadata may include role,
+  resolver, confidence, fallback/user-adjustment state, topmost-at-gaze state,
+  clipping, padding, and included geometric relationships.
 - Absolute AppKit, Core Graphics, display, Retina backing, or global desktop
   coordinates do not cross the bridge. Display IDs, window titles, application
   names, filesystem paths, and raw gaze samples are also excluded.

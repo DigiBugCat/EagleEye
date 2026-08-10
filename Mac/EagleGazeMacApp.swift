@@ -18,7 +18,7 @@ struct EagleGazeMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("EagleGaze", id: EagleGazeSceneID.mainWindow) {
+        WindowGroup("EagleEye", id: EagleGazeSceneID.mainWindow) {
             MacContentView(
                 application: application,
                 voiceOSBridge: voiceOSBridge,
@@ -29,7 +29,7 @@ struct EagleGazeMacApp: App {
         }
         .defaultSize(width: 1180, height: 780)
 
-        Window("EagleGaze Status", id: EagleGazeSceneID.statusWindow) {
+        Window("EagleEye Status", id: EagleGazeSceneID.statusWindow) {
             EagleGazeCompactStatusView(
                 application: application,
                 overlayController: overlayController
@@ -51,7 +51,7 @@ struct EagleGazeMacApp: App {
                 hasProfile: application.snapshot.profile != nil
             )
             Image(systemName: status.symbolName)
-                .accessibilityLabel("EagleGaze: \(status.title)")
+                .accessibilityLabel("EagleEye: \(status.title)")
         }
         .menuBarExtraStyle(.window)
     }

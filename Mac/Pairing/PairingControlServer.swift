@@ -120,7 +120,7 @@ public final class PairingControlServer: PairingAdvertisementService, @unchecked
 
     public init(
         pairingService: PairingService? = nil,
-        serviceIdentity: String = "EagleGaze Mac",
+        serviceIdentity: String = "EagleEye Mac",
         queue: DispatchQueue = DispatchQueue(label: "app.eaglegaze.mac.pairing-control"),
         timeout: TimeInterval = PairingControlServer.defaultTimeout,
         onSessionReady: SessionReadyHandler? = nil,

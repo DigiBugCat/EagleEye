@@ -39,7 +39,7 @@ enum EagleGazeMenuBarStatus: Equatable {
 
     var detail: String {
         switch self {
-        case .needsPhone: "Open EagleGaze to create a secure pairing code."
+        case .needsPhone: "Open EagleEye to create a secure pairing code."
         case .waiting: "The selected source has not sent a fresh gaze frame."
         case .connected: "The stream is live; calibration is the next step."
         case .calibrating: "Keep looking at the target on the selected display."
@@ -135,7 +135,7 @@ struct EagleGazeMenuBarView: View {
             Divider()
 
             HStack {
-                Button("Open EagleGaze…") { showMainWindow() }
+                Button("Open EagleEye…") { showMainWindow() }
                     .keyboardShortcut("o")
                 Button("Status window") { showStatusWindow() }
                 Spacer()
@@ -308,7 +308,7 @@ struct EagleGazeCompactStatusView: View {
                 .frame(width: 38, height: 38)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("EagleGaze").font(.headline)
+                    Text("EagleEye").font(.headline)
                     Text(status.title).font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()

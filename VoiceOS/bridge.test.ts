@@ -182,7 +182,19 @@ describe("EagleGazeBridgeClient", () => {
             marker: "square",
             capturedAt: "2026-08-09T12:00:00Z",
             gaze: { x: 1, y: 1.5, normalizedX: 0.5, normalizedY: 0.5, uncertaintyRadius: 0.5 },
-            region: { kind: "text", resolvedBy: "accessibility", confidence: 0.85, fallbackUsed: false, topmostAtGaze: true, includedRelationships: ["header"] },
+            attention: {
+              estimator: "rolling_fixation", confidence: 0.88, sampleCount: 14,
+              fixationDurationMilliseconds: 380, newestSampleAgeMilliseconds: 20,
+              uncertainty: {
+                radiusX: 1, radiusY: 1, normalizedRadiusX: 0.5, normalizedRadiusY: 0.333,
+                bounds: { x: 0, y: 0, width: 2, height: 3 },
+              },
+            },
+            region: {
+              kind: "text", resolvedBy: "accessibility", confidence: 0.85,
+              fallbackUsed: false, topmostAtGaze: true, userAdjusted: false,
+              partiallyClipped: false, paddingPercent: 6, includedRelationships: ["header"],
+            },
             enrichment: {
               provenance: "external_provider", trust: "untrusted_advisory",
               provider: "cerebras", model: "gemma-4-31b", contentType: "settings panel",
@@ -206,13 +218,31 @@ describe("EagleGazeBridgeClient", () => {
     const metadata = JSON.parse(content[1]!.text!);
     expect(metadata).toMatchObject({
       coordinateSpace: "image_pixels",
-      image: { width: 2, height: 3 },
+      coordinateSystem: { id: "returned_image_top_left", origin: "top_left", xAxis: "right", yAxis: "down" },
+      image: {
+        kind: "image", mimeType: "image/jpeg", width: 2, height: 3,
+        sha256, target: "calibrated_display", scope: "context_region",
+      },
       gaze: { x: 1, y: 1.5, normalizedX: 0.5, normalizedY: 0.5, uncertaintyRadius: 0.5 },
+      attention: {
+        estimator: "rolling_fixation", confidence: 0.88, sampleCount: 14,
+        fixationDurationMilliseconds: 380, newestSampleAgeMilliseconds: 20,
+        uncertainty: { radiusX: 1, radiusY: 1, bounds: { x: 0, y: 0, width: 2, height: 3 } },
+      },
       marker: "square",
-      region: { kind: "text", resolvedBy: "accessibility", fallbackUsed: false, topmostAtGaze: true, includedRelationships: ["header"] },
+      region: {
+        kind: "text", resolvedBy: "accessibility", fallbackUsed: false,
+        topmostAtGaze: true, userAdjusted: false, partiallyClipped: false,
+        paddingPercent: 6, includedRelationships: ["header"],
+      },
       enrichment: {
         provenance: "external_provider", trust: "untrusted_advisory",
         provider: "cerebras", model: "gemma-4-31b", focusedText: "Smart crop",
+      },
+      enrichmentStatus: "succeeded",
+      privacy: {
+        coordinatesAreImageRelative: true, globalCoordinatesIncluded: false,
+        rawGazeSamplesIncluded: false, continuousTrackingIncluded: false,
       },
     });
   });

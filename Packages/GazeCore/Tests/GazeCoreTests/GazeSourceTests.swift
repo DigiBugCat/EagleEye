@@ -119,6 +119,11 @@ private func sample(
     #expect(result.point == Point2D(x: 0, y: 0))
     #expect(result.blink == .open)
     #expect(abs((result.blinkConfidence ?? 0) - 0.15) < 1e-12)
+    let ray = try #require(result.gazeRay)
+    #expect(ray.origin == Vector3(x: 1, y: 2, z: 3.25))
+    #expect(abs(ray.direction.x) < 1e-12)
+    #expect(abs(ray.direction.y) < 1e-12)
+    #expect(abs(ray.direction.z - 1) < 1e-12)
 }
 
 @Test func arkitExtractorRetainsHeadRotationAndMarksUntrackedFrames() throws {

@@ -156,15 +156,23 @@ public struct CalibrationPlan: Codable, Equatable, Sendable {
     }
 
     public static let standard: CalibrationPlan = {
-        let grid = [0.16, 0.50, 0.84].flatMap { y in
-            [0.16, 0.50, 0.84].map { x in Point2D(x: x, y: y) }
+        // Keep nine training targets, but extend them far enough toward the
+        // perimeter that the model is interpolating at common corner targets
+        // instead of extrapolating from an overly central grid.
+        let grid = [0.10, 0.50, 0.90].flatMap { y in
+            [0.10, 0.50, 0.90].map { x in Point2D(x: x, y: y) }
         }
+        // Validation deliberately stresses all four corners and edge centers.
+        // A good center fit cannot hide a poor perimeter model.
         let validationTargets = [
-            Point2D(x: 0.50, y: 0.24),
-            Point2D(x: 0.72, y: 0.42),
-            Point2D(x: 0.62, y: 0.72),
-            Point2D(x: 0.38, y: 0.72),
-            Point2D(x: 0.28, y: 0.42),
+            Point2D(x: 0.06, y: 0.06),
+            Point2D(x: 0.94, y: 0.06),
+            Point2D(x: 0.94, y: 0.94),
+            Point2D(x: 0.06, y: 0.94),
+            Point2D(x: 0.50, y: 0.06),
+            Point2D(x: 0.94, y: 0.50),
+            Point2D(x: 0.50, y: 0.94),
+            Point2D(x: 0.06, y: 0.50),
         ]
         let timing = try! CalibrationTimingConfiguration(
             settleDuration: 0.70,

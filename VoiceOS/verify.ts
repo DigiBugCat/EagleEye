@@ -63,9 +63,10 @@ try {
     (tool: { name: string; description?: string }) => tool.name === "capture_gaze",
   )?.description ?? "";
   for (const routingClause of [
-    "ROUTING REQUIREMENT",
-    "Do not substitute a generic screenshot",
-    "user explicitly requests a non-gaze/full-screen capture",
+    "MANDATORY GAZE ROUTING",
+    "MUST call capture_gaze first",
+    "Never satisfy such a request with built-in screenshot",
+    "user explicitly asks for a non-gaze or full-screen capture",
   ]) {
     if (!captureDescription.includes(routingClause)) {
       throw new Error(`capture_gaze is missing its strong routing clause: ${routingClause}`);

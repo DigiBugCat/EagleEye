@@ -125,7 +125,7 @@ public final class PairingService {
 
     public init(
         receiverFingerprint: String,
-        serviceIdentity: String = "EagleGaze Mac",
+        serviceIdentity: String = "EagleEye Mac",
         store: any PairedDeviceStore,
         advertisement: (any PairingAdvertisementService)? = nil,
         onStateChanged: StateChangeHandler? = nil,
@@ -164,7 +164,7 @@ public final class PairingService {
     /// identity before creating offers.  Tests can inject the in-memory store.
     public convenience init(
         identityStore: any MacReceiverIdentityStore,
-        serviceIdentity: String = "EagleGaze Mac",
+        serviceIdentity: String = "EagleEye Mac",
         store: any PairedDeviceStore,
         advertisement: (any PairingAdvertisementService)? = nil,
         onStateChanged: StateChangeHandler? = nil,

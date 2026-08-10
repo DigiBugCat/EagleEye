@@ -47,9 +47,11 @@ log image bytes or their Base64 representation, accept caller-supplied approval,
 or write captures to a temporary file.
 
 Only coordinates relative to the approved returned image may accompany it.
-Global desktop/display coordinates, raw gaze samples, display identifiers,
-window titles, application names, calibration transforms, and source/session
-identifiers remain outside the bridge contract. The pixels themselves can
+Bounded aggregate fixation evidence—confidence, sample count, coverage
+duration, newest-sample age, and image-relative uncertainty—may describe that
+one capture. Global desktop/display coordinates, individual gaze samples,
+display identifiers, window titles, application names, calibration transforms,
+and source/session identifiers remain outside the bridge contract. The pixels themselves can
 contain secrets or personal information, so callers and reviewers must treat an
 approved response as sensitive even when metadata is minimal.
 

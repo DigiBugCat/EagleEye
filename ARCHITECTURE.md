@@ -22,8 +22,10 @@ into calibration or presentation code.
   freshness; foregrounding creates a new authenticated stream session.
 - VoiceOS receives coarse connection, source, and calibration state. A bounded,
   explicitly approved `capture_gaze` call may additionally return one annotated
-  image and coordinates relative to that returned image. It never receives raw,
-  global, or continuous gaze coordinates.
+  image, coordinates relative to that returned image, uncertainty/fixation
+  aggregates, semantic-region selection metadata, and optional untrusted
+  provider enrichment. It never receives individual raw samples, global or
+  continuous gaze coordinates, display identity, or ARKit transforms.
 
 ## Module boundaries
 
@@ -85,8 +87,10 @@ The TypeScript adapter exposes four MCP tools:
 - `start_gaze_evaluation`, always registered so clients see a stable surface;
   the adapter returns `feature_disabled` unless
   `EAGLEGAZE_ENABLE_EVALUATION=1`; and
-- `capture_gaze` for one approved annotated screen-context image plus its
-  image-relative gaze point and uncertainty.
+- `capture_gaze` for one approved annotated screen-context image plus its image
+  identity, explicit coordinate system, image-relative gaze and uncertainty,
+  bounded fixation evidence, region-selection metadata, and optional untrusted
+  enrichment.
 
 If a loopback connection is refused, the adapter may ask a host-provided,
 bundle-identifier-scoped capability to open EagleGazeMac, wait for readiness,

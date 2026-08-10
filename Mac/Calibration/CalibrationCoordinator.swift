@@ -8,12 +8,14 @@ private let calibrationCoordinatorLog = Logger(subsystem: "com.aviary.EagleGazeM
 public struct CalibrationContext: Equatable, Sendable {
     public let profileKey: CalibrationProfileKey
     public let coordinateSpace: CalibrationCoordinateSpace
+    public let screenSizeMeters: PhysicalSize2D?
 
     public init(
         sourceID: GazeSourceID,
         displayID: String,
         setupID: String,
-        coordinateSpace: CalibrationCoordinateSpace = .source
+        coordinateSpace: CalibrationCoordinateSpace = .source,
+        screenSizeMeters: PhysicalSize2D? = nil
     ) {
         self.profileKey = CalibrationProfileKey(
             sourceID: sourceID,
@@ -21,11 +23,17 @@ public struct CalibrationContext: Equatable, Sendable {
             setupID: setupID
         )
         self.coordinateSpace = coordinateSpace
+        self.screenSizeMeters = screenSizeMeters
     }
 
-    public init(profileKey: CalibrationProfileKey, coordinateSpace: CalibrationCoordinateSpace = .source) {
+    public init(
+        profileKey: CalibrationProfileKey,
+        coordinateSpace: CalibrationCoordinateSpace = .source,
+        screenSizeMeters: PhysicalSize2D? = nil
+    ) {
         self.profileKey = profileKey
         self.coordinateSpace = coordinateSpace
+        self.screenSizeMeters = screenSizeMeters
     }
 
     public var sourceID: GazeSourceID { profileKey.sourceID }
@@ -229,13 +237,15 @@ public final class CalibrationCoordinator: @unchecked Sendable {
         sourceID: GazeSourceID,
         displayID: String,
         setupID: String,
-        coordinateSpace: CalibrationCoordinateSpace = .source
+        coordinateSpace: CalibrationCoordinateSpace = .source,
+        screenSizeMeters: PhysicalSize2D? = nil
     ) throws -> [CalibrationCoordinatorEvent] {
         try setContext(CalibrationContext(
             sourceID: sourceID,
             displayID: displayID,
             setupID: setupID,
-            coordinateSpace: coordinateSpace
+            coordinateSpace: coordinateSpace,
+            screenSizeMeters: screenSizeMeters
         ))
     }
 
@@ -308,7 +318,7 @@ public final class CalibrationCoordinator: @unchecked Sendable {
             // timing must use this Mac's monotonic clock instead.
             let events = try engine.consume(frame, at: clock())
             self.engine = engine
-            let mapped = profile?.apply(to: frame.point)
+            let mapped = profile?.apply(to: frame)
             return publish(engineEvents(events, mappedPoint: mapped))
         } catch let error as CalibrationEngineError {
             return try fail(error)
@@ -397,6 +407,7 @@ public final class CalibrationCoordinator: @unchecked Sendable {
                 engine = try CalibrationEngine(
                     plan: plan,
                     profile: stored,
+                    screenSizeMeters: context.screenSizeMeters,
                     wallClock: wallClock
                 )
                 profile = stored
@@ -408,6 +419,7 @@ public final class CalibrationCoordinator: @unchecked Sendable {
                 plan: plan,
                 profileKey: context.profileKey,
                 coordinateSpace: context.coordinateSpace,
+                screenSizeMeters: context.screenSizeMeters,
                 wallClock: wallClock
             )
             profile = nil
@@ -486,6 +498,14 @@ public final class CalibrationCoordinator: @unchecked Sendable {
                 )
             case let .candidateFitted(report):
                 calibrationCoordinatorLog.notice("Candidate fitted \(report.summary, privacy: .public)")
+            case let .rayPlaneCandidateFitted(report):
+                calibrationCoordinatorLog.notice("Ray-plane candidate fitted \(report.summary, privacy: .public)")
+            case let .rayPlaneCandidateUnavailable(reason):
+                calibrationCoordinatorLog.info("Ray-plane candidate unavailable reason=\(reason, privacy: .public)")
+            case let .modelComparisonCompleted(legacyRMS, legacyWorst, rayRMS, rayWorst, selected):
+                calibrationCoordinatorLog.notice(
+                    "Model comparison selected=\(selected?.rawValue ?? "none", privacy: .public) legacyRMS=\(legacyRMS ?? -1, format: .fixed(precision: 4), privacy: .public) legacyWorst=\(legacyWorst ?? -1, format: .fixed(precision: 4), privacy: .public) rayRMS=\(rayRMS ?? -1, format: .fixed(precision: 4), privacy: .public) rayWorst=\(rayWorst ?? -1, format: .fixed(precision: 4), privacy: .public)"
+                )
             case let .validationCompleted(rms, worst, accepted):
                 calibrationCoordinatorLog.notice(
                     "Candidate validation accepted=\(accepted, privacy: .public) rms=\(rms, format: .fixed(precision: 4), privacy: .public) worst=\(worst, format: .fixed(precision: 4), privacy: .public)"

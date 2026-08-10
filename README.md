@@ -1,6 +1,6 @@
-# EagleGaze
+# EagleEye
 
-EagleGaze is an experimental two-app system that uses an iPhone's ARKit face
+EagleEye is an experimental two-app system that uses an iPhone's ARKit face
 and eye estimates as coarse gaze input for a Mac. It renders a gaze dot and
 measures a 3x3 target hit rate; it intentionally does not control the macOS
 pointer.
@@ -35,9 +35,11 @@ as an above/below mode; moving either device still requires a new acceptance run
    encrypted, versioned gaze datagrams over the local network. No cloud service
    is involved.
 4. `EagleGazeMac` presents nine calibration targets, collects only stable
-   both-eyes-open samples, fits affine and projective candidates with outlier
-   evidence, then checks the winner on five off-grid validation targets. The
-   prior saved profile remains active unless the replacement passes.
+   both-eyes-open samples, and fits two model families in parallel: the legacy
+   affine/projective direction mapper and a metric 3D ray-to-screen-plane
+   mapper. Eight independent perimeter targets compare their RMS and worst
+   corner/edge error. The prior saved profile remains active unless the selected
+   replacement passes.
 5. The Mac renders the accepted mapping through a presentation-only 1-Euro
    stabilizer with a dead zone and saccade snapping. Raw samples—not the
    stabilized dot—always drive calibration.
@@ -50,11 +52,22 @@ from an earlier tracking run, and frames predating the target epoch do not
 advance the target. A failed point is recollected instead of silently entering
 the fit. The UI's teal progress ring shows stable collection progress.
 
-After the 3x3 training grid, five spatially distinct targets measure RMS and
-worst-case error. A failed validation selectively recollects the nearest weak
-training point; a candidate that still fails is rejected without overwriting
-the last known-good profile. **Recenter** performs a one-point center correction
-for ordinary drift; **Recalibrate** always starts a full new candidate run.
+The 3x3 grid reaches toward the screen perimeter instead of training only in the
+center. Afterward, eight independent targets cover all four corners and four
+edge centers and measure RMS plus worst perimeter error. The 3D candidate uses
+the selected display's physical dimensions reported by macOS, estimates its
+6-DoF plane relative to the phone from stable gaze rays, and intersects every
+live ray with that fitted plane. It is selected only when independent evidence
+shows a meaningful average or worst-perimeter improvement; otherwise the 2D
+candidate remains active. If macOS cannot report trustworthy display dimensions,
+3D fitting is skipped safely.
+
+A failed validation selectively recollects the nearest weak training point; a
+candidate that still fails is rejected without overwriting the last known-good
+profile. **Recenter** performs a one-point center correction for ordinary drift;
+**Recalibrate** always starts a full new candidate run. A selected 3D profile
+allows normal seating translation because eye origin is part of the model, but
+physically moving the phone or display still requires recalibration.
 
 ## Rolling attention estimate
 
@@ -68,7 +81,10 @@ The window has a hard horizon based on each sample's capture time: samples older
 than 550 ms relative to the newest accepted sample are removed, regardless of
 packet rate. It expires after a long sample gap and resets when tracking is
 lost, the phone starts a new session, or calibration is reset or replaced. This
-history is transient and is never persisted or exposed through VoiceOS.
+history is transient and is never persisted or exported as individual samples.
+An approved capture may expose only bounded aggregate evidence—sample count,
+confidence, coverage duration, newest-sample age, and image-relative
+uncertainty—needed to interpret that capture.
 
 The estimate remains a normalized screen location. During an approved capture,
 the Mac can combine it with a bounded, geometry-only Accessibility hit test to
@@ -78,7 +94,7 @@ crop when permission or useful geometry is unavailable.
 ## Run
 
 1. Open `EagleGaze.xcodeproj` in Xcode.
-2. Build and run `EagleGazeMac` on the Mac.
+2. Build and run the `EagleGazeMac` scheme on the Mac. It produces `EagleEye.app`.
 3. Select the `EagleGazePhone` scheme, choose a supported physical iPhone, and
    configure the signing team if Xcode requests it. ARKit face tracking does not
    work in Simulator.
@@ -106,8 +122,9 @@ camera-based ARKit tracking.
 
 ## Verify without a phone
 
-The wire format, packet gate, robust affine/projective fitting, transactional
-validation, geometry monitor, and smoothing are a standalone Swift package:
+The wire format, packet gate, robust affine/projective fitting, metric ray-plane
+fitting, transactional model comparison, geometry monitor, and smoothing are a
+standalone Swift package:
 
 ```sh
 cd Packages/GazeCore
@@ -136,7 +153,8 @@ EagleGaze uses Apple's unified logging with separate subsystems for the Mac and
 iPhone. Logs cover discovery, control connections, pairing approval, saved-pair
 authentication, gaze-session activation, calibration run/target epochs,
 accepted and rejected sample counts, target retries, fit selection, validation
-metrics, geometry prompts, recenter corrections, and teardown. They
+metrics for both 2D and 3D candidates, worst perimeter error, physical display
+dimensions, full-ray availability, geometry prompts, recenter corrections, and teardown. They
 intentionally exclude verification codes, cryptographic keys, camera data, and
 individual gaze samples.
 

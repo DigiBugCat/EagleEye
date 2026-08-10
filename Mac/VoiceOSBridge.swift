@@ -31,7 +31,7 @@ enum GazeApplicationServiceError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "EagleGaze application services are not configured."
+            return "EagleEye application services are not configured."
         case .notConnected:
             return "Connect the iPhone and wait for a live stream first."
         case .notCalibrated:
@@ -261,7 +261,7 @@ final class VoiceOSBridge: ObservableObject {
         do {
             let request = try JSONDecoder().decode(ToolBridgeRequest.self, from: line)
             guard request.version == Self.toolProtocolVersion else {
-                throw ToolBridgeFailure(code: "unsupported_version", message: "EagleGaze tool protocol v2 is required.", retryable: false)
+                throw ToolBridgeFailure(code: "unsupported_version", message: "EagleEye tool protocol v2 is required.", retryable: false)
             }
             guard UUID(uuidString: request.requestID) != nil else {
                 throw ToolBridgeFailure(code: "invalid_request", message: "requestID must be a UUID.", retryable: false)
@@ -310,12 +310,16 @@ final class VoiceOSBridge: ObservableObject {
                             normalizedY: artifact.normalizedY,
                             uncertaintyRadius: artifact.uncertaintyRadius
                         ),
+                        attention: ToolAttentionResult(artifact: artifact),
                         region: ToolRegionResult(
                             kind: artifact.region.kind.rawValue,
                             resolvedBy: artifact.region.resolvedBy.rawValue,
                             confidence: artifact.region.confidence,
                             fallbackUsed: artifact.region.fallbackUsed,
                             topmostAtGaze: artifact.region.topmostAtGaze,
+                            userAdjusted: artifact.region.userAdjusted,
+                            partiallyClipped: artifact.region.partiallyClipped,
+                            paddingPercent: artifact.region.paddingPercent,
                             includedRelationships: artifact.region.includedRelationships
                         ),
                         enrichment: artifact.enrichment.map {
@@ -338,7 +342,7 @@ final class VoiceOSBridge: ObservableObject {
                     )
                 )
             default:
-                throw ToolBridgeFailure(code: "unknown_tool", message: "That EagleGaze tool is not supported.", retryable: false)
+                throw ToolBridgeFailure(code: "unknown_tool", message: "That EagleEye tool is not supported.", retryable: false)
             }
         } catch let error as ToolBridgeFailure {
             response = .failure(requestID: Self.requestID(from: line), error: error)
@@ -387,7 +391,7 @@ final class VoiceOSBridge: ObservableObject {
 
     private func process(_ request: BridgeRequest) -> BridgeResponse {
         guard request.version == Self.protocolVersion else {
-            return failure(request, code: "unsupported_version", message: "EagleGaze bridge protocol v1 is required.")
+            return failure(request, code: "unsupported_version", message: "EagleEye bridge protocol v1 is required.")
         }
         switch request.command {
         case "status":
@@ -531,11 +535,12 @@ private struct ToolResult: Encodable {
     let target: String?
     let scope: String?
     let gaze: ToolGazeResult?
+    let attention: ToolAttentionResult?
     let region: ToolRegionResult?
     let enrichment: ToolEnrichmentResult?
     let enrichmentWarning: String?
 
-    init(snapshot: BridgeSnapshot? = nil, kind: String? = nil, mimeType: String? = nil, width: Int? = nil, height: Int? = nil, sha256: String? = nil, marker: String? = nil, capturedAt: String? = nil, target: String? = nil, scope: String? = nil, gaze: ToolGazeResult? = nil, region: ToolRegionResult? = nil, enrichment: ToolEnrichmentResult? = nil, enrichmentWarning: String? = nil) {
+    init(snapshot: BridgeSnapshot? = nil, kind: String? = nil, mimeType: String? = nil, width: Int? = nil, height: Int? = nil, sha256: String? = nil, marker: String? = nil, capturedAt: String? = nil, target: String? = nil, scope: String? = nil, gaze: ToolGazeResult? = nil, attention: ToolAttentionResult? = nil, region: ToolRegionResult? = nil, enrichment: ToolEnrichmentResult? = nil, enrichmentWarning: String? = nil) {
         self.snapshot = snapshot
         self.kind = kind
         self.mimeType = mimeType
@@ -547,6 +552,7 @@ private struct ToolResult: Encodable {
         self.target = target
         self.scope = scope
         self.gaze = gaze
+        self.attention = attention
         self.region = region
         self.enrichment = enrichment
         self.enrichmentWarning = enrichmentWarning
@@ -559,7 +565,60 @@ private struct ToolRegionResult: Encodable {
     let confidence: Double
     let fallbackUsed: Bool
     let topmostAtGaze: Bool?
+    let userAdjusted: Bool
+    let partiallyClipped: Bool
+    let paddingPercent: Double?
     let includedRelationships: [String]
+}
+
+private struct ToolAttentionResult: Encodable {
+    let estimator: String
+    let confidence: Double?
+    let sampleCount: Int?
+    let fixationDurationMilliseconds: Int?
+    let newestSampleAgeMilliseconds: Int?
+    let uncertainty: ToolUncertaintyResult
+
+    init(artifact: GazeCaptureArtifact) {
+        let radiusX = artifact.attention.uncertaintyRadiusX
+        let radiusY = artifact.attention.uncertaintyRadiusY
+        let minimumX = max(0, artifact.gazeX - radiusX)
+        let minimumY = max(0, artifact.gazeY - radiusY)
+        let maximumX = min(artifact.width, artifact.gazeX + radiusX)
+        let maximumY = min(artifact.height, artifact.gazeY + radiusY)
+        estimator = artifact.attention.estimator
+        confidence = artifact.attention.confidence
+        sampleCount = artifact.attention.sampleCount
+        fixationDurationMilliseconds = artifact.attention.fixationDurationMilliseconds
+        newestSampleAgeMilliseconds = artifact.attention.newestSampleAgeMilliseconds
+        uncertainty = ToolUncertaintyResult(
+            radiusX: radiusX,
+            radiusY: radiusY,
+            normalizedRadiusX: Double(radiusX) / Double(artifact.width),
+            normalizedRadiusY: Double(radiusY) / Double(artifact.height),
+            bounds: ToolImageRectResult(
+                x: minimumX,
+                y: minimumY,
+                width: max(0, maximumX - minimumX),
+                height: max(0, maximumY - minimumY)
+            )
+        )
+    }
+}
+
+private struct ToolUncertaintyResult: Encodable {
+    let radiusX: Int
+    let radiusY: Int
+    let normalizedRadiusX: Double
+    let normalizedRadiusY: Double
+    let bounds: ToolImageRectResult
+}
+
+private struct ToolImageRectResult: Encodable {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
 }
 
 private struct ToolEnrichmentResult: Encodable {

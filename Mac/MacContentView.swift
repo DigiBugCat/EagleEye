@@ -42,7 +42,7 @@ struct MacContentView: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("EagleGaze").font(.headline)
+                    Text("EagleEye").font(.headline)
                     Text("Eye tracking for Mac")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -210,7 +210,7 @@ struct MacContentView: View {
                             featureIcon("dot.radiowaves.left.and.right")
                             VStack(alignment: .leading, spacing: 5) {
                                 Text("Ready for nearby pairing").font(.headline)
-                                Text("Open EagleGaze on your iPhone, choose this Mac, and compare the six-digit code before approving.")
+                                Text("Open EagleEye on your iPhone, choose this Mac, and compare the six-digit code before approving.")
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
@@ -513,7 +513,7 @@ struct MacContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Divider()
-                    Text("VoiceOS receives coarse state and, only after an EagleGaze preview is approved, an annotated gaze-context image with image-relative coordinates and bounded region metadata. Continuous gaze remains local.")
+                    Text("VoiceOS receives coarse state and, only after an EagleEye preview is approved, an annotated gaze-context image with image-relative coordinates and bounded region metadata. Continuous gaze remains local.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -545,9 +545,23 @@ struct MacContentView: View {
                     }
                 }
                 Text("Accepted \(application.receiver.acceptedPacketCount) • rejected \(application.receiver.rejectedPacketCount + application.receiver.decodeErrorCount)")
+                if let size = application.selectedDisplay?.physicalSize {
+                    Text("Physical display \(size.widthMeters, format: .number.precision(.fractionLength(3))) × \(size.heightMeters, format: .number.precision(.fractionLength(3))) m • full ray \(application.latestFrame?.gazeRay == nil ? "missing" : "available")")
+                }
                 Text("Calibration run \(application.snapshot.calibrationRunID?.uuidString.prefix(8) ?? "—") • epoch \(application.snapshot.targetEpoch) • rejected \(application.snapshot.rejectedSampleCount)")
                 if let dispersion = application.snapshot.targetDispersion {
                     Text("Target dispersion \(dispersion, format: .number.precision(.fractionLength(4))) • retry \(application.snapshot.targetRetryCount)")
+                }
+                if let profile = application.snapshot.profile {
+                    Text("Selected model: \(profile.quality.modelName ?? "legacy")")
+                    if let legacyRMS = profile.quality.legacyValidationRMSError,
+                       let legacyWorst = profile.quality.legacyValidationMaxError {
+                        Text("2D validation RMS \(legacyRMS, format: .number.precision(.fractionLength(4))) • perimeter worst \(legacyWorst, format: .number.precision(.fractionLength(4)))")
+                    }
+                    if let rayRMS = profile.quality.rayPlaneValidationRMSError,
+                       let rayWorst = profile.quality.rayPlaneValidationMaxError {
+                        Text("3D validation RMS \(rayRMS, format: .number.precision(.fractionLength(4))) • perimeter worst \(rayWorst, format: .number.precision(.fractionLength(4)))")
+                    }
                 }
                 if let error = application.lastError { Text(error).foregroundStyle(.red) }
             }

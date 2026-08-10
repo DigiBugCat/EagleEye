@@ -19,11 +19,22 @@ struct GazeCaptureArtifact: Sendable {
     let normalizedX: Double
     let normalizedY: Double
     let uncertaintyRadius: Int
+    let attention: GazeCaptureAttentionMetadata
     let marker: GazeCaptureMarker
     let capturedAt: Date
     let region: GazeCaptureRegionMetadata
     let enrichment: VisionEnrichment?
     let enrichmentWarning: String?
+}
+
+struct GazeCaptureAttentionMetadata: Sendable {
+    let estimator: String
+    let confidence: Double?
+    let sampleCount: Int?
+    let fixationDurationMilliseconds: Int?
+    let newestSampleAgeMilliseconds: Int?
+    let uncertaintyRadiusX: Int
+    let uncertaintyRadiusY: Int
 }
 
 struct GazeCaptureRegionMetadata: Sendable {
@@ -32,6 +43,9 @@ struct GazeCaptureRegionMetadata: Sendable {
     let confidence: Double
     let fallbackUsed: Bool
     let topmostAtGaze: Bool?
+    let userAdjusted: Bool
+    let partiallyClipped: Bool
+    let paddingPercent: Double?
     let includedRelationships: [String]
 }
 
@@ -53,10 +67,10 @@ enum GazeCaptureError: LocalizedError, Equatable {
         case .gazeStale: "A fresh stabilized gaze position is required."
         case .notCalibrated: "Complete calibration before capturing gaze."
         case .displayUnavailable: "The calibrated display is no longer available."
-        case .permissionRequired: "Enable Screen Recording for EagleGaze in System Settings."
-        case .approvalRejected: "The capture was not approved in EagleGaze."
-        case .captureFailed: "EagleGaze could not capture the selected display."
-        case .encodingFailed: "EagleGaze could not encode the annotated capture."
+        case .permissionRequired: "Enable Screen Recording for EagleEye in System Settings."
+        case .approvalRejected: "The capture was not approved in EagleEye."
+        case .captureFailed: "EagleEye could not capture the selected display."
+        case .encodingFailed: "EagleEye could not encode the annotated capture."
         case .responseTooLarge: "The annotated capture exceeded the 4 MiB response limit."
         case .requestCancelled: "The requesting connection closed before capture approval."
         }
@@ -221,6 +235,7 @@ final class GazeCaptureService: GazeCaptureServicing {
             normalizedX: rendered.gaze.x / CGFloat(rendered.image.width),
             normalizedY: rendered.gaze.y / CGFloat(rendered.image.height),
             uncertaintyRadius: Int(rendered.uncertaintyRadius.rounded()),
+            attention: rendered.attention,
             marker: marker,
             capturedAt: capturedAt,
             region: rendered.region,
@@ -269,6 +284,7 @@ final class GazeCaptureService: GazeCaptureServicing {
         focus: CGImage?,
         gaze: CGPoint,
         uncertaintyRadius: CGFloat,
+        attention: GazeCaptureAttentionMetadata,
         region: GazeCaptureRegionMetadata
     ) {
         if smartCropEnabled,
@@ -331,12 +347,24 @@ final class GazeCaptureService: GazeCaptureServicing {
             nil,
             localGaze,
             uncertainty,
+            GazeCaptureAttentionMetadata(
+                estimator: "mapped_point_fallback",
+                confidence: nil,
+                sampleCount: nil,
+                fixationDurationMilliseconds: nil,
+                newestSampleAgeMilliseconds: nil,
+                uncertaintyRadiusX: Int(uncertainty.rounded()),
+                uncertaintyRadiusY: Int(uncertainty.rounded())
+            ),
             GazeCaptureRegionMetadata(
                 kind: .unknown,
                 resolvedBy: .fixedContextFallback,
                 confidence: 0.35,
                 fallbackUsed: true,
                 topmostAtGaze: nil,
+                userAdjusted: false,
+                partiallyClipped: false,
+                paddingPercent: nil,
                 includedRelationships: []
             )
         )
@@ -353,6 +381,7 @@ final class GazeCaptureService: GazeCaptureServicing {
         focus: CGImage?,
         gaze: CGPoint,
         uncertaintyRadius: CGFloat,
+        attention: GazeCaptureAttentionMetadata,
         region: GazeCaptureRegionMetadata
     ) {
         let displayBounds = CGDisplayBounds(displayID)
@@ -392,12 +421,11 @@ final class GazeCaptureService: GazeCaptureServicing {
         ) else { throw GazeCaptureError.captureFailed }
 
         let crops = try cropRenderer.render(source: source, plan: plan)
+        let uncertaintyPixelsX = max(18, radiusX * CGFloat(source.width) / displayBounds.width)
+        let uncertaintyPixelsY = max(18, radiusY * CGFloat(source.height) / displayBounds.height)
         let uncertaintyPixels = max(
             18,
-            max(
-                radiusX * CGFloat(source.width) / displayBounds.width,
-                radiusY * CGFloat(source.height) / displayBounds.height
-            )
+            max(uncertaintyPixelsX, uncertaintyPixelsY)
         )
         let annotated = try annotate(
             crops.context,
@@ -410,12 +438,29 @@ final class GazeCaptureService: GazeCaptureServicing {
             crops.enlargedFocus,
             plan.gazeInCrop,
             uncertaintyPixels,
+            GazeCaptureAttentionMetadata(
+                estimator: attention == nil ? "mapped_point_fallback" : "rolling_fixation",
+                confidence: attention?.sourceConfidence,
+                sampleCount: attention?.sampleCount,
+                fixationDurationMilliseconds: attention.map { Int(($0.coverageDuration * 1_000).rounded()) },
+                newestSampleAgeMilliseconds: attention.map { Int(($0.newestSampleAge * 1_000).rounded()) },
+                uncertaintyRadiusX: Int(uncertaintyPixelsX.rounded()),
+                uncertaintyRadiusY: Int(uncertaintyPixelsY.rounded())
+            ),
             GazeCaptureRegionMetadata(
                 kind: selection.selected.role,
                 resolvedBy: selection.selected.source,
                 confidence: selection.selected.confidence,
                 fallbackUsed: selection.selected.source == .fixedContextFallback,
                 topmostAtGaze: selection.selected.source == .accessibility ? true : nil,
+                userAdjusted: selection.selected.source == .userAdjusted,
+                partiallyClipped: !displayBounds.contains(
+                    selection.selected.globalBounds.insetBy(
+                        dx: -selection.selected.globalBounds.width * regionSelector.policy.paddingRatio,
+                        dy: -selection.selected.globalBounds.height * regionSelector.policy.paddingRatio
+                    )
+                ),
+                paddingPercent: Double(regionSelector.policy.paddingRatio * 100),
                 includedRelationships: selection.selected.includedRelationships
                     .map(\.rawValue)
                     .sorted()
@@ -475,7 +520,7 @@ final class GazeCaptureService: GazeCaptureServicing {
         alert.messageText = "Share this gaze capture?"
         alert.informativeText = sendsToCerebras
             ? "An unidentified local process requested this capture. If approved, the context image enters the local downstream integration and both previewed images are sent to Cerebras for optional labeling. They may contain private on-screen information."
-            : "An unidentified local process requested this capture. If you approve, these exact annotated pixels leave EagleGaze and enter the downstream integration, where they may contain private on-screen information."
+            : "An unidentified local process requested this capture. If you approve, these exact annotated pixels leave EagleEye and enter the downstream integration, where they may contain private on-screen information."
         alert.addButton(withTitle: "Share Capture")
         alert.addButton(withTitle: "Cancel")
         let preview = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))

@@ -12,6 +12,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>EagleEye</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,7 +28,7 @@
 		<string>_eagle-gaze._udp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>EagleGaze discovers and pairs with your iPhone, then receives live gaze estimates over your local network.</string>
+	<string>EagleEye discovers and pairs with your iPhone, then receives live gaze estimates over your local network.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
