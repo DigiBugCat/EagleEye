@@ -77,7 +77,7 @@ jobs:
           destinations="$(xcodebuild -project EagleGaze.xcodeproj -scheme EagleGazePhoneTests -showdestinations)"
           simulator_udid="$(sed -nE 's/.*platform:iOS Simulator, arch:[^,]+, id:([^,]+),.*/\1/p' <<< "$destinations" | head -1 | tr -d ' ')"
           if [ -z "$simulator_udid" ]; then
-            echo "Duck has no iPhone simulator accepted by the EagleGazePhone scheme." >&2
+            echo "The runner has no iPhone simulator accepted by the EagleGazePhoneTests scheme." >&2
             echo "$destinations" >&2
             exit 1
           fi
