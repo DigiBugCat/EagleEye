@@ -6,9 +6,14 @@ import UIKit
 private let phoneLifecycleLog = Logger(subsystem: "com.aviary.EagleGazePhone", category: "lifecycle")
 
 @main
+@MainActor
 struct EagleGazePhoneApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var model = PhoneAppModel()
+    @StateObject private var model: PhoneAppModel
+
+    init() {
+        _model = StateObject(wrappedValue: PhoneAppModel())
+    }
 
     var body: some Scene {
         WindowGroup {
